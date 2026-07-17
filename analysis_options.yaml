@@ -1,0 +1,21 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  # Supports the input-hardening "no bare cast on untrusted input" rule:
+  # an implicit/ downcast on a dynamic (e.g. parsed XML, config maps) is an error.
+  language:
+    strict-casts: true
+    strict-raw-types: true
+  errors:
+    # Treat unused imports/locals as warnings we must clear before commit.
+    unused_import: warning
+    unused_local_variable: warning
+
+linter:
+  rules:
+    - prefer_final_locals
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - avoid_print
+    - always_declare_return_types
+    - unawaited_futures

@@ -1,0 +1,31 @@
+# NOTE: when a .pubignore exists, pub uses it INSTEAD of .gitignore (they do
+# not stack), so build artifacts must be repeated here or they ship in the
+# published tarball.
+
+# Build artifacts (mirror of .gitignore).
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+coverage/
+pubspec.lock
+example/pubspec.lock
+
+# Dev-only tooling — kept in git, excluded from the published pub.dev tarball.
+.claude/
+.ai/
+tests/
+history/
+templates/
+.github/
+.gitattributes
+.gitignore
+CONTRIBUTING.md
+SECURITY.md
+CLAUDE.md
+
+# Reference/workflow docs that consumers of the library don't need.
+docs/Progressive Disclosure Documentation Guide.md
+docs/claude-code-hook-integration.md
+docs/DOC-PROVENANCE.md

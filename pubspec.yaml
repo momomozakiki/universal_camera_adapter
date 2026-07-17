@@ -1,0 +1,37 @@
+name: universal_camera_adapter
+description: >-
+  A modular, pluggable camera abstraction for Flutter. Unifies local device
+  cameras (Android, Windows webcams) and external network/IP cameras (ONVIF/RTSP)
+  behind a single, testable CameraAdapter interface.
+version: 1.0.0
+repository: https://github.com/momomozakiki/universal_camera_adapter
+issue_tracker: https://github.com/momomozakiki/universal_camera_adapter/issues
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Local device cameras (Android + Windows). The federated `camera` plugin
+  # endorses its platform implementations (camera_android, camera_windows)
+  # transitively — no need to list them explicitly for pub resolution.
+  camera: ^0.12.0
+
+  # --- ONVIF / IP-camera backend dependencies (added in v1.1) ---
+  # Deliberately NOT declared yet: the ONVIF backend is scaffolding only
+  # (throws UnimplementedError) and pulls no packages, so consumers of the
+  # local-camera path don't drag in a heavy native RTSP stack. When v1.1
+  # implements ONVIF, add:
+  #   http: ^1.6.0            # SOAP requests
+  #   xml: ^7.0.0             # SOAP/XML parsing
+  #   media_kit: ^1.2.0       # RTSP preview (native)
+  #   media_kit_video: ^2.0.0 # RTSP video widget
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:

@@ -3,38 +3,39 @@
 The canonical, checkable "where are we" tracker. Follow it top-down; update the status boxes and
 commit note as each item is verified and committed. This supersedes ad-hoc status notes.
 
-**Next action:** Section B — scaffold the Flutter package (`pubspec.yaml`, `analysis_options.yaml`)
-and implement the core contract (`CameraAdapter`, `CameraAdapterRegistry`, value types) in `lib/src/`.
+**Next action:** Epic 2 (v1.1) — implement the real ONVIF backend: WS-UsernameToken auth, Media
+service (GetProfiles/GetStreamUri), and RTSP preview via `media_kit` (add the deferred
+`http`/`xml`/`media_kit` deps then), following the `input-hardening` rules.
 
 ---
 
-## Epic 0 — Adopt the self-correcting workflow & repo practices  *(in progress)*
+## Epic 0 — Adopt the self-correcting workflow & repo practices  *(done)*
 
 - [x] Vendor workflow-core (`.claude/hooks/workflow_hook.py`, config, schemas, hook tests).
 - [x] Fix plan-mode permission prompts (`.claude/settings.json` → `permissions.allow`).
 - [x] Import the four skills (`adaptive-workflow`, `camera-adapter-authoring`,
       `dart-solid-principles`, `input-hardening`).
 - [x] Documentation conventions (docs tree + index, provenance, weekly ledger, this roadmap).
-- [ ] Root `CLAUDE.md`, agents, `.gitignore`, CI, `CONTRIBUTING.md`, `SECURITY.md`.
-- [ ] Commit Section A on `feat/adopt-workflow`.
+- [x] Root `CLAUDE.md`, agents, `.gitignore`, CI, `CONTRIBUTING.md`, `SECURITY.md`.
+- [x] Commit Section A on `feat/adopt-workflow`.
 
-## Epic 1 — v1.0: core contract + local backend  *(not started)*
+## Epic 1 — v1.0: core contract + local backend  *(done)*
 
-- [ ] Package skeleton: `pubspec.yaml`, `analysis_options.yaml` (strict-casts), `LICENSE`,
+- [x] Package skeleton: `pubspec.yaml`, `analysis_options.yaml` (strict-casts), `LICENSE`,
       `CHANGELOG.md`, `README.md`.
-- [ ] Core contract & value types (`lib/src/camera_adapter.dart`,
+- [x] Core contract & value types (`lib/src/camera_adapter.dart`,
       `camera_adapter_registry.dart`, `camera_types.dart`).
-- [ ] `FlutterCameraAdapter` (Android + Windows) with queried zoom capability and the
+- [x] `FlutterCameraAdapter` (Android + Windows) with queried zoom capability and the
       `captureFrame()` hung-driver safeguard.
-- [ ] Barrel export (`lib/universal_camera_adapter.dart`).
-- [ ] `MockCameraAdapter` + unit tests (registry, contract-via-mock).
-- [ ] Minimal `example/` app.
-- [ ] CI (`.github/workflows/test.yml`) green; `flutter pub publish --dry-run` clean.
+- [x] Barrel export (`lib/universal_camera_adapter.dart`).
+- [x] `MockCameraAdapter` + unit tests (registry, contract-via-mock).
+- [x] Minimal `example/` app.
+- [x] CI (`.github/workflows/test.yml`); `flutter analyze --fatal-infos` + `flutter test` green.
 
 ## Epic 2 — v1.1: ONVIF backend (network/IP cameras)
 
-- [ ] Scaffolding: `lib/src/onvif/` stubs (adapter, SOAP, media service, RTSP preview) that compile
-      and register but throw `UnimplementedError`. **(this pass — v1.0 + scaffolding)**
+- [x] Scaffolding: `lib/src/onvif/` stubs (adapter, SOAP, media service, RTSP preview) that compile
+      and register but throw `UnimplementedError`. **(done — v1.0 + scaffolding pass)**
 - [ ] WS-UsernameToken (PasswordDigest) + HTTP Digest auth.
 - [ ] Media service (GetProfiles, GetStreamUri) + RTSP preview via `media_kit` (TCP).
 - [ ] PTZ AbsoluteMove (pan/tilt/zoom); snapshot via GetSnapshotUri.

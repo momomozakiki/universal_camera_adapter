@@ -9,7 +9,9 @@
       "Bash(flutter analyze:*)", "Bash(flutter test:*)", "Bash(flutter pub get:*)",
       "Bash(dart analyze:*)", "Bash(dart test:*)", "Bash(dart format:*)",
       "Bash(dart --version)", "Bash(flutter --version)",
-      "Bash(cat:*)", "Bash(ls:*)", "Bash(find:*)"
+      "Bash(cat:*)", "Bash(ls:*)", "Bash(find:*)",
+      "Bash(gh pr view:*)", "Bash(gh pr list:*)", "Bash(gh pr status:*)",
+      "Bash(gh pr checks:*)", "Bash(gh repo view:*)"
     ]
   },
   "hooks": {

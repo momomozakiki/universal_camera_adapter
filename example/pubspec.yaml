@@ -1,0 +1,19 @@
+name: universal_camera_adapter_example
+description: Minimal example app demonstrating universal_camera_adapter.
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  universal_camera_adapter:
+    path: ../
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
