@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ai-self-correcting-workflow/schemas/config_schema.json",
+  "title": "workflow_config.json",
+  "description": "Project-specific configuration for the Adaptive Self-Correcting Workflow. Maps generic workflow concepts onto concrete project paths and toggles features. Consumed by hooks/workflow_hook.py.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "project_root": {
+      "type": "string",
+      "description": "Project root relative to this config file (usually \".\").",
+      "default": "."
+    },
+    "roadmap_file": {
+      "type": "string",
+      "description": "Path (relative to project_root) to the roadmap file. The SessionStart hook parses the first '**Next action:**' line from it.",
+      "default": "ROADMAP.md"
+    },
+    "retrospective_file": {
+      "type": "string",
+      "description": "Path to the retrospective document, if used."
+    },
+    "ledger": {
+      "type": "object",
+      "description": "Weekly change-history ledger settings.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "directory": {
+          "type": "string",
+          "description": "Directory holding history/YYYY-Www.md files.",
+          "default": "history"
+        }
+      }
+    },
+    "source_directories": {
+      "type": "array",
+      "description": "Directories whose edits mark the session as source-changed (drives the Stop ledger reminder).",
+      "items": { "type": "string" },
+      "default": ["src", "lib"]
+    },
+    "documentation_directories": {
+      "type": "array",
+      "description": "Directories treated as documentation; touching one suppresses the doc nudge.",
+      "items": { "type": "string" },
+      "default": ["docs", ".ai"]
+    },
+    "env_check": {
+      "type": "object",
+      "description": "Tools verified at SessionStart (F2).",
+      "additionalProperties": false,
+      "properties": {
+        "tool_paths": {
+          "type": "object",
+          "description": "Map of tool name -> { path, version_flag }.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Path to the executable (absolute, or relative to project_root)."
+              },
+              "version_flag": {
+                "type": ["string", "null"],
+                "description": "Flag to query the version (e.g. '--version'). If null or empty, the hook only verifies the path exists. If omitted, '--version' is assumed.",
+                "default": "--version"
+              }
+            },
+            "required": ["path"]
+          }
+        }
+      }
+    },
+    "stop_hook": {
+      "type": "object",
+      "description": "Stop-event behaviour.",
+      "additionalProperties": false,
+      "properties": {
+        "max_blocks": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum times the Stop hook may block per session before it gives up.",
+          "default": 2
+        },
+        "main_branch": {
+          "type": "string",
+          "description": "Name of the main/protected branch. The dirty-tree commit reminder is suppressed when on this branch.",
+          "default": "main"
+        }
+      }
+    },
+    "workflow_update_check": {
+      "type": "object",
+      "description": "F5 daily update check for the vendored workflow-core submodule. Opt-in and notification-only: when enabled, SessionStart fetches the submodule at most once per day and reports if it is behind upstream. Never auto-applies the update.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Master switch. When false (default) the check is skipped entirely and no git fetch runs.",
+          "default": false
+        },
+        "submodule_path": {
+          "type": "string",
+          "description": "Path (relative to project_root) to the vendored workflow-core git submodule.",
+          "default": ".claude/workflow-core"
+        },
+        "remote": {
+          "type": "string",
+          "description": "Git remote of the submodule to fetch and compare against.",
+          "default": "origin"
+        },
+        "branch": {
+          "type": "string",
+          "description": "Upstream branch to compare the submodule HEAD against.",
+          "default": "main"
+        }
+      }
+    }
+  }
+}

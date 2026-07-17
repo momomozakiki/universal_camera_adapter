@@ -1,0 +1,36 @@
+{
+  "project_root": "..",
+  "roadmap_file": "docs/plan/ROADMAP.md",
+  "ledger": {
+    "enabled": true,
+    "directory": "history"
+  },
+  "source_directories": ["lib", "test"],
+  "documentation_directories": ["docs", ".ai"],
+  "env_check": {
+    "tool_paths": {
+      "dart": {
+        "path": "C:\\Users\\kbsim\\.puro\\envs\\default\\flutter\\bin\\dart.bat",
+        "version_flag": "--version"
+      },
+      "flutter": {
+        "path": "C:\\Users\\kbsim\\.puro\\envs\\default\\flutter\\bin\\flutter.bat",
+        "version_flag": "--version"
+      },
+      "python": {
+        "path": "python",
+        "version_flag": "--version"
+      }
+    }
+  },
+  "stop_hook": {
+    "max_blocks": 2,
+    "main_branch": "main"
+  },
+  "workflow_update_check": {
+    "enabled": false,
+    "submodule_path": ".claude/workflow-core",
+    "remote": "origin",
+    "branch": "main"
+  }
+}

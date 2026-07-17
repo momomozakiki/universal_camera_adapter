@@ -1,0 +1,33 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+coverage/
+doc/api/
+
+# A package (not an app) should not commit its lockfile
+pubspec.lock
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Personal, un-committed Claude Code settings
+.claude/settings.local.json
+
+# Workflow hook state / daily check marker
+.ai/.workflow_check_date
+
+# Python hook test bytecode
+tests/hook/__pycache__/
+**/__pycache__/
+*.pyc

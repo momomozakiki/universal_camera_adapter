@@ -1,0 +1,48 @@
+{
+  "permissions": {
+    "allow": [
+      "Read", "Grep", "Glob",
+      "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)",
+      "Bash(git fetch:*)", "Bash(git pull:*)", "Bash(git branch:*)",
+      "Bash(git remote:*)", "Bash(git rev-parse:*)", "Bash(git show:*)",
+      "Bash(python -m unittest:*)", "Bash(python --version)",
+      "Bash(flutter analyze:*)", "Bash(flutter test:*)", "Bash(flutter pub get:*)",
+      "Bash(dart analyze:*)", "Bash(dart test:*)", "Bash(dart format:*)",
+      "Bash(dart --version)", "Bash(flutter --version)",
+      "Bash(cat:*)", "Bash(ls:*)", "Bash(find:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/workflow_hook.py\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/workflow_hook.py\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/workflow_hook.py\""
+          }
+        ]
+      }
+    ]
+  }
+}
