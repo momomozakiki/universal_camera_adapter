@@ -12,6 +12,15 @@ coverage/
 pubspec.lock
 example/pubspec.lock
 
+# Generated example platform scaffolding — kept in git (reproducible APK builds),
+# excluded from the published tarball so it doesn't bloat the pub.dev package.
+example/android/
+example/ios/
+example/windows/
+example/linux/
+example/macos/
+example/web/
+
 # Dev-only tooling — kept in git, excluded from the published pub.dev tarball.
 .claude/
 .ai/
