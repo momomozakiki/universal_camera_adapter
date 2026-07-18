@@ -21,6 +21,10 @@ example/linux/
 example/macos/
 example/web/
 
+# Built app binaries + build helper — not part of the published library.
+dist/
+scripts/
+
 # Dev-only tooling — kept in git, excluded from the published pub.dev tarball.
 .claude/
 .ai/

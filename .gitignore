@@ -12,6 +12,10 @@ doc/api/
 # A package (not an app) should not commit its lockfile
 pubspec.lock
 
+# Built app binaries collected for fast access (see dist/README.md); large & reproducible.
+dist/*.apk
+dist/*.aab
+
 # IDE
 .idea/
 *.iml
