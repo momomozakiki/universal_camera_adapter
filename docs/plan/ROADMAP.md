@@ -29,7 +29,10 @@ service (GetProfiles/GetStreamUri), and RTSP preview via `media_kit` (add the de
       `captureFrame()` hung-driver safeguard.
 - [x] Barrel export (`lib/universal_camera_adapter.dart`).
 - [x] `MockCameraAdapter` + unit tests (registry, contract-via-mock).
-- [x] Minimal `example/` app.
+- [x] Minimal `example/` app — since expanded into a bottom-nav **camera testing toolkit**
+      (Preview/Capture, QR scanner, 1D barcode scanner, capture gallery, PTZ/zoom), all on one
+      shared `CameraAdapter`; scanners poll `captureFrame()` + decode via `flutter_zxing` (no
+      contract change). Builds for Android (`app-debug.apk`).
 - [x] CI (`.github/workflows/test.yml`); `flutter analyze --fatal-infos` + `flutter test` green.
 
 ## Epic 2 — v1.1: ONVIF backend (network/IP cameras)

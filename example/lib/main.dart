@@ -1,11 +1,16 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
+import 'camera_session.dart';
+import 'tabs/barcode_scanner_tab.dart';
+import 'tabs/gallery_tab.dart';
+import 'tabs/preview_tab.dart';
+import 'tabs/ptz_tab.dart';
+import 'tabs/qr_scanner_tab.dart';
+
 /// Build the registry once, at startup — the Golden Rule in practice:
-/// the UI below depends only on [CameraAdapter] + [CameraAdapterRegistry],
-/// never on the concrete [FlutterCameraAdapter].
+/// the UI depends only on [CameraAdapter] + [CameraAdapterRegistry], never on
+/// the concrete [FlutterCameraAdapter].
 CameraAdapterRegistry buildRegistry() {
   final registry = CameraAdapterRegistry();
   registry.register('builtin', FlutterCameraAdapter.new, asDefault: true);
@@ -27,124 +32,105 @@ class ExampleApp extends StatelessWidget {
     return MaterialApp(
       title: 'universal_camera_adapter example',
       theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-      home: CameraPage(registry: registry),
+      home: CameraToolkitPage(registry: registry),
     );
   }
 }
 
-class CameraPage extends StatefulWidget {
-  const CameraPage({super.key, required this.registry});
+/// A bottom-nav "camera testing toolkit": one shared [CameraSession] (so at
+/// most one device is ever open) surfaced through several self-contained
+/// testing tabs — Preview/Capture, QR scanner, 1D barcode scanner, a
+/// capture gallery, and a PTZ/zoom capability tester.
+class CameraToolkitPage extends StatefulWidget {
+  const CameraToolkitPage({super.key, required this.registry});
 
   final CameraAdapterRegistry registry;
 
   @override
-  State<CameraPage> createState() => _CameraPageState();
+  State<CameraToolkitPage> createState() => _CameraToolkitPageState();
 }
 
-class _CameraPageState extends State<CameraPage> {
-  late final CameraAdapter _adapter = widget.registry.createDefault();
+class _CameraToolkitPageState extends State<CameraToolkitPage> {
+  late final CameraSession _session =
+      CameraSession(widget.registry.createDefault());
 
-  List<CameraDevice> _devices = const <CameraDevice>[];
-  bool _busy = false;
-  String? _status;
+  int _index = 0;
+
+  static const _titles = <String>[
+    'Preview',
+    'QR scanner',
+    'Barcode scanner',
+    'Gallery',
+    'PTZ / Zoom',
+  ];
 
   @override
   void initState() {
     super.initState();
-    _refreshDevices();
+    // List devices only — the camera stays off until the user taps Connect.
+    _session.refreshDevices();
   }
 
   @override
   void dispose() {
-    // Lifecycle is strict: always close what we opened.
-    unawaited(_adapter.close());
+    _session.dispose();
     super.dispose();
-  }
-
-  Future<void> _refreshDevices() async {
-    setState(() => _busy = true);
-    try {
-      final devices = await _adapter.listDevices();
-      setState(() {
-        _devices = devices;
-        _status = devices.isEmpty ? 'No cameras found.' : null;
-      });
-    } on StateError catch (e) {
-      setState(() => _status = e.message);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _open(CameraDevice device) async {
-    setState(() => _busy = true);
-    try {
-      await _adapter.open(device);
-      setState(() => _status = 'Opened ${device.name} — ${_adapter.capabilities}');
-    } on StateError catch (e) {
-      setState(() => _status = 'Open failed: ${e.message}');
-    } on TimeoutException {
-      setState(() => _status = 'Camera took too long to respond.');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _capture() async {
-    try {
-      final bytes = await _adapter.captureFrame();
-      setState(() => _status = 'Captured ${bytes.length} bytes.');
-    } on StateError catch (e) {
-      setState(() => _status = 'Capture failed: ${e.message}');
-    } on TimeoutException {
-      setState(() => _status = 'Capture timed out.');
-    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Rebuilt on every tab switch so `active` flows to the scanner tabs; the
+    // IndexedStack keeps all tabs (and the shared preview) alive across
+    // switches, so scanners just pause rather than tear down.
+    final tabs = <Widget>[
+      PreviewTab(session: _session),
+      QrScannerTab(session: _session, active: _index == 1),
+      BarcodeScannerTab(session: _session, active: _index == 2),
+      GalleryTab(session: _session),
+      PtzTab(session: _session),
+    ];
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Universal Camera Adapter'),
+        title: Text('Camera Toolkit · ${_titles[_index]}'),
         actions: [
           IconButton(
-            onPressed: _busy ? null : _refreshDevices,
+            tooltip: 'Refresh camera list',
             icon: const Icon(Icons.refresh),
+            onPressed: _session.refreshDevices,
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _adapter.isOpen
-                ? _adapter.buildPreview()
-                : Center(child: Text(_status ?? 'Select a camera below.')),
+      body: IndexedStack(index: _index, children: tabs),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (i) => setState(() => _index = i),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.videocam_outlined),
+            selectedIcon: Icon(Icons.videocam),
+            label: 'Preview',
           ),
-          if (_status != null && _adapter.isOpen)
-            Padding(padding: const EdgeInsets.all(8), child: Text(_status!)),
-          const Divider(height: 1),
-          SizedBox(
-            height: 120,
-            child: ListView(
-              children: [
-                for (final device in _devices)
-                  ListTile(
-                    leading: const Icon(Icons.videocam),
-                    title: Text(device.name),
-                    subtitle: Text('${device.lensFacing.name} · ${device.id}'),
-                    onTap: _busy ? null : () => _open(device),
-                  ),
-              ],
-            ),
+          NavigationDestination(
+            icon: Icon(Icons.qr_code_scanner),
+            label: 'QR',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.barcode_reader),
+            label: 'Barcode',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.photo_library_outlined),
+            selectedIcon: Icon(Icons.photo_library),
+            label: 'Gallery',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.control_camera_outlined),
+            selectedIcon: Icon(Icons.control_camera),
+            label: 'PTZ',
           ),
         ],
       ),
-      floatingActionButton: _adapter.isOpen
-          ? FloatingActionButton(
-              onPressed: _capture,
-              child: const Icon(Icons.camera),
-            )
-          : null,
     );
   }
 }
