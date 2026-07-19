@@ -13,8 +13,10 @@ doc/api/
 pubspec.lock
 
 # Built app binaries collected for fast access (see dist/README.md); large & reproducible.
+# .sha256 sidecars accompany the (ignored) binaries — ignore them too; only dist/README.md is tracked.
 dist/*.apk
 dist/*.aab
+dist/*.sha256
 
 # IDE
 .idea/
