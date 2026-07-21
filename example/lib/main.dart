@@ -3,6 +3,7 @@ import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import 'camera_session.dart';
 import 'tabs/barcode_scanner_tab.dart';
+import 'tabs/ezviz_tab.dart';
 import 'tabs/gallery_tab.dart';
 import 'tabs/preview_tab.dart';
 import 'tabs/ptz_tab.dart';
@@ -62,6 +63,7 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
     'Barcode scanner',
     'Gallery',
     'PTZ / Zoom',
+    'EZVIZ bridge',
   ];
 
   @override
@@ -88,6 +90,7 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
       BarcodeScannerTab(session: _session, active: _index == 2),
       GalleryTab(session: _session),
       PtzTab(session: _session),
+      const EzvizTab(),
     ];
 
     return Scaffold(
@@ -128,6 +131,11 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
             icon: Icon(Icons.control_camera_outlined),
             selectedIcon: Icon(Icons.control_camera),
             label: 'PTZ',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.cloud_outlined),
+            selectedIcon: Icon(Icons.cloud),
+            label: 'EZVIZ',
           ),
         ],
       ),

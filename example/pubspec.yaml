@@ -21,6 +21,20 @@ dependencies:
   # See example/lib/scanning/.
   image: ^4.3.0
   flutter_zxing: ^2.2.0
+  # Native EZVIZ player widget (wraps EZVIZ's own Android/iOS SDKs), used only
+  # by the EZVIZ bridge test tab (example/lib/tabs/ezviz_tab.dart) to play a
+  # camera's live stream directly from its serial + the account's Open
+  # Platform accessToken (from scripts/ezviz_bridge.py) - no HLS/RTMP/ezopen
+  # URL handling needed on the Dart side at all. Android/iOS only (no Windows
+  # implementation exists), which matches this project's existing Windows
+  # toolchain constraint (see webview_flutter_windows's C++23 requirement,
+  # ruled out for the same reason).
+  ezviz_flutter: ^1.2.7
+  http: ^1.2.0
+  # Persists the EZVIZ tab's bridge host and verification code fields across
+  # app restarts (example/lib/tabs/ezviz_tab.dart) - a testing convenience
+  # only, not device credentials, so plain local storage is fine.
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_lints: ^6.0.0
