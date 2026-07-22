@@ -232,10 +232,10 @@ Planned for v1.3. Feature support depends on the specific EZVIZ model queried po
 zoom             → depends on model (fixed-lens: unsupported; PTZ dome: supported; some cameras have digital zoom only—must be flagged as a distinct concern)
 pan              → depends on model (queried from device capability response post-open)
 tilt             → depends on model (queried from device capability response post-open)
-frameCapture     → unresolved (see 3.5 below; flagged for v1.3 implementation)
-qrScanning       → unresolved (depends on frameCapture resolution)
-barcodeScanning  → unresolved (depends on frameCapture resolution)
-textRecognitionOcr → unresolved (depends on frameCapture resolution)
+frameCapture     → resolvable, not yet wired (see 3.5 below; the underlying native SDK supports it, the vendored plugin doesn't call it yet)
+qrScanning       → unvalidated (depends on frameCapture being wired up)
+barcodeScanning  → unvalidated (depends on frameCapture being wired up)
+textRecognitionOcr → unvalidated (depends on frameCapture being wired up)
 twoWayAudio      → unvalidated (placeholder)
 motionEvents     → unvalidated (placeholder)
 ```
@@ -244,28 +244,32 @@ Notably, PTZ capabilities are **queried at runtime** post-open (from the SDK's d
 response), not assumed by backend type—a CS-H6c reports none, while a PTZ dome would. This is why
 the matrix must be computed dynamically, not hardcoded per backend name.
 
-## The EZVIZ platform-view frame-capture question (flagged, not resolved)
+## The EZVIZ platform-view frame-capture question — spiked, resolved
 
 `ezviz_flutter`'s player is a **platform view** (an embedded native Android/iOS view compositing
 the SDK's own decoded video), unlike the `camera` plugin's **texture-based** preview which exposes
-readable frame bytes. Two possibilities, to be verified against `ezviz_flutter`'s real API surface
-**before finalizing**:
+readable frame bytes. This was flagged as a genuine open question — verified by reading the
+vendored plugin's native source (`example/third_party/ezviz_flutter/android/.../EzvizPlayerView.kt`,
+`EzvizView.kt`) and the decompiled real EZVIZ Android SDK (`com.videogo.openapi.EZPlayer`):
 
-1. **Separate capture method:** The plugin may expose a native `capturePicture` method-channel
-   call. If so, `EzvizCameraAdapter.captureFrame()` shells out to that call and reads the resulting
-   file's bytes back. This is the most promising path and should be the first v1.3 implementation
-   spike. If confirmed present and working, EZVIZ's `frameCapture` status becomes `supported`.
+- The method channel **does** expose `capturePicture` (`EzvizView.kt` calls
+  `result.success(player.capturePicture())` — confirmed as one of the handful of calls that
+  actually resolves the Dart future, unlike `initPlayerByDevice`/`setPlayVerifyCode`/`startRealPlay`).
+- However, the vendored plugin's `EzvizPlayerView.kt::capturePicture()` is currently a **stub**:
+  `Log.w(TAG, "Capture picture not implemented in current SDK version"); return null` — same stub
+  on iOS (`EzvizPlayer.swift::capturePicture()`).
+- The **real underlying native SDK does support it**: `com.videogo.openapi.EZPlayer` has a genuine
+  `capturePicture(int): android.graphics.Bitmap` method (confirmed via decompiled class inspection)
+  the vendored plugin simply never calls.
 
-2. **No capture API exists:** `captureFrame()` must throw `UnsupportedError` — legitimate and
-   contract-compliant. This raises an architecture question: does `captureFrame()` need to become
-   an optional contract method for platform-view-only backends? Or should it be declared up front
-   via `featureMatrix`'s `frameCapture` status (`unsupported`), allowing the UI to disable tabs
-   before a caller tries and gets an error? Recommend the latter (feature-matrix-based gating), to
-   keep `captureFrame()` a hard contract method all backends must implement (even if it's "throw
-   UnsupportedError").
-
-This is a **genuine open architecture question**, not a guess. The design is sound either way;
-implementation must verify which `ezviz_flutter` call signature actually exists.
+**Conclusion: frame capture is possible, it's a plugin-wiring gap, not an SDK limitation.**
+`EzvizCameraAdapter.captureFrame()` can become `supported` once the vendored `EzvizPlayerView.kt`
+(and iOS equivalent) is patched to call the real `player.capturePicture(...)`, encode the returned
+`Bitmap` (e.g. PNG-compress to a `ByteArrayOutputStream`), and return the bytes (or a saved file
+path) over the method channel instead of the current `null` stub. Until that patch lands,
+`frameCapture` stays `unvalidated` (not `unsupported` — the capability is confirmed reachable, just
+not yet wired), and `qrScanning`/`barcodeScanning`/`textRecognitionOcr` stay gated behind it per the
+existing "scanning decoupled from capture" design below.
 
 ## Scanning decoupled from capture
 

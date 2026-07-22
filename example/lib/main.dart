@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import 'camera_session.dart';
+import 'ezviz/ezviz_camera_adapter.dart';
 import 'tabs/barcode_scanner_tab.dart';
 import 'tabs/ezviz_tab.dart';
 import 'tabs/gallery_tab.dart';
@@ -12,9 +13,16 @@ import 'tabs/qr_scanner_tab.dart';
 /// Build the registry once, at startup — the Golden Rule in practice:
 /// the UI depends only on [CameraAdapter] + [CameraAdapterRegistry], never on
 /// the concrete [FlutterCameraAdapter].
+///
+/// `ezviz` is registered but not selectable from the bottom-nav toolkit yet —
+/// there is no `CameraSession.switchTo()` (Epic 2.5) or setup wizard to drive
+/// sign-in/device-selection through this registry today, so the EZVIZ tab
+/// still talks to `ezviz_flutter` directly. Registering it here proves the
+/// adapter satisfies the contract and is ready once that UI plumbing lands.
 CameraAdapterRegistry buildRegistry() {
   final registry = CameraAdapterRegistry();
   registry.register('builtin', FlutterCameraAdapter.new, asDefault: true);
+  registry.register('ezviz', EzvizCameraAdapter.new);
   // Future: registry.register('onvif', ONVIFCameraAdapter.new);
   return registry;
 }
