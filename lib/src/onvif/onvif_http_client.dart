@@ -17,6 +17,9 @@ const int maxOnvifResponseBytes = 1 * 1024 * 1024; // 1 MB
 
 const String _devicePath = '/onvif/device_service';
 
+/// Path suffix for the ONVIF Media service endpoint.
+const String onvifMediaServicePath = '/onvif/media_service';
+
 /// Posts ONVIF SOAP envelopes to a device's `device_service` endpoint.
 ///
 /// Credentials are only ever used to compute a digest/response value; the raw
@@ -28,7 +31,9 @@ class OnvifHttpClient {
 
   final http.Client _client;
 
-  /// POSTs [envelope] to `http://$host:$port$_devicePath`.
+  /// POSTs [envelope] to `http://$host:$port$path` ([path] defaults to the
+  /// Device service endpoint; pass [onvifMediaServicePath] for Media service
+  /// calls).
   ///
   /// - Throws [TimeoutException] if no response arrives within [timeout].
   /// - Throws [StateError] on an HTTP 401 that a Digest retry can't resolve
@@ -44,11 +49,12 @@ class OnvifHttpClient {
     String? username,
     String? password,
     required Duration timeout,
+    String path = _devicePath,
   }) async {
     if (host.isEmpty || port < 1 || port > 65535) {
       throw StateError('Invalid ONVIF host/port.');
     }
-    final uri = Uri.parse('http://$host:$port$_devicePath');
+    final uri = Uri.parse('http://$host:$port$path');
 
     final first = await _send(uri, envelope, timeout: timeout);
     if (first.statusCode != 401) {
@@ -63,7 +69,7 @@ class OnvifHttpClient {
     final digestHeader = _buildDigestHeader(
       challenge: challenge,
       method: 'POST',
-      uri: _devicePath,
+      uri: path,
       username: username,
       password: password,
     );

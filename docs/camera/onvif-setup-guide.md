@@ -1,22 +1,23 @@
 ---
 title: ONVIF / IP-Camera Setup Guide
-version: 0.2
+version: 0.3
 last_validated: 2026-07-22
 official: false
 source: agent-generated
 tags: [onvif, rtsp, ws-discovery, network-permissions, planned]
 applies_when: "Setting up or implementing the ONVIF/IP-camera backend (v1.1)."
-estimated_tokens: 650
+estimated_tokens: 700
 ---
 
 # ONVIF / IP-camera setup guide (partially implemented — v1.1 in progress)
 
-**Version 0.2** — auth (`open`/`close`/`isOpen`) is implemented; discovery, media/RTSP preview,
-snapshot, and PTZ remain scaffolding (throw `UnimplementedError`).
+**Version 0.3** — auth (`open`/`close`/`isOpen`) and media/RTSP preview (`buildPreview`) are
+implemented; discovery, snapshot, and PTZ remain scaffolding (throw `UnimplementedError`).
 
 ## Revision History
 | Version | Date       | Change                          |
 |---------|------------|---------------------------------|
+| 0.3     | 2026-07-22 | Media service (`GetProfiles`/`GetStreamUri`) + RTSP preview via `media_kit` implemented. |
 | 0.2     | 2026-07-22 | Auth implemented: WS-UsernameToken (PasswordDigest) + HTTP Digest fallback. |
 | 0.1     | 2026-07-18 | Initial stub: network permissions. |
 
@@ -52,13 +53,21 @@ inbound + outbound UDP 3702. RTSP streams are typically TCP on port 554.
   default for callers to apply, not adapter logic. Validated with a `GetDeviceInformation` probe;
   a SOAP `Fault` or malformed/incomplete XML maps to `StateError`/`FormatException` per the typed
   error surface. `close()` disposes the underlying `http.Client`.
+- **Media + preview (done):** after auth succeeds, `open()` calls `OnvifMediaService.getProfiles()`
+  (Media service `GetProfiles`) and picks the first profile, then `getStreamUri()` (`GetStreamUri`,
+  requesting RTP-Unicast/RTSP transport) to resolve the RTSP URI — rejecting anything that isn't
+  `rtsp://` before it's ever used. That URI is handed to an `RtspPreview` (`media_kit` +
+  `media_kit_video`), which forces `rtsp-transport=tcp` on the native player (avoids UDP packet loss
+  on flaky camera LANs). `buildPreview()` returns the resulting `Video` widget; it throws
+  `StateError` if called before a successful `open()`. The preview player is created in `open()` and
+  disposed in `close()` — callers must still call `close()` to release it. A malformed individual
+  media profile is skipped rather than failing the whole call; a device reporting zero usable
+  profiles, a SOAP `Fault`, or a non-`rtsp://` stream URI all map to the typed error surface.
 
 ## Planned behavior (not yet implemented)
 
 - **Discovery:** manual IP entry, plus optional WS-Discovery — deferred to Epic 2.5's
   `CameraDiscoveryPipeline`/`NetworkDiscoverable` mixin, not a standalone ONVIF-only discoverer.
-- **Media:** GetProfiles → GetStreamUri (RTSP) → preview via `media_kit` over **TCP** transport
-  (not `flutter_vlc_player`).
 - **Snapshot:** GetSnapshotUri → size-capped HTTP GET.
 - **PTZ:** AbsoluteMove for pan/tilt/zoom, reported through `CameraCapabilities`.
 - **Profile/secret caching:** Epic 2.5's `CameraProfileStore` (non-secret config, e.g.

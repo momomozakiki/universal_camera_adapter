@@ -7,7 +7,20 @@ import 'package:xml/xml.dart';
 import '../camera_adapter.dart';
 import '../camera_types.dart';
 import 'onvif_http_client.dart';
+import 'onvif_media_service.dart';
 import 'onvif_soap.dart';
+import 'rtsp_preview.dart';
+
+/// Factory signature for building an [OnvifMediaServiceBase] against an
+/// already-authenticated [OnvifHttpClient]. Overridable for tests so they
+/// never have to touch a real [OnvifMediaService]/HTTP client.
+typedef OnvifMediaServiceFactory = OnvifMediaServiceBase Function({
+  required String host,
+  required int port,
+  String? username,
+  String? password,
+  required OnvifHttpClient httpClient,
+});
 
 /// Credentials + endpoint for an ONVIF camera.
 ///
@@ -34,11 +47,13 @@ class OnvifCredentials {
 
 /// **Partially implemented** network/IP-camera backend (ROADMAP v1.1).
 ///
-/// [open]/[close]/[isOpen] are real: [open] authenticates against the
-/// device's ONVIF service (WS-UsernameToken PasswordDigest, with an RFC 2617
-/// HTTP Digest fallback) by issuing `GetDeviceInformation`. Media/discovery/
-/// PTZ remain scaffolding and throw [UnimplementedError] until later roadmap
-/// items land.
+/// [open]/[close]/[isOpen]/[buildPreview] are real: [open] authenticates
+/// against the device's ONVIF service (WS-UsernameToken PasswordDigest, with
+/// an RFC 2617 HTTP Digest fallback) via `GetDeviceInformation`, then
+/// resolves the main media profile's RTSP URI (`GetProfiles`/`GetStreamUri`)
+/// and opens it in a `media_kit`-backed preview player. `captureFrame`, PTZ,
+/// and discovery remain scaffolding and throw [UnimplementedError] until
+/// later roadmap items land.
 ///
 /// Failures map to the typed surface ([StateError] / [TimeoutException] /
 /// [FormatException] / [UnsupportedError]) per the `camera-adapter-authoring`
@@ -51,8 +66,12 @@ class ONVIFCameraAdapter extends CameraAdapter {
     this.credentials,
     OnvifSoap? soap,
     OnvifHttpClient Function()? httpClientFactory,
+    OnvifMediaServiceFactory? mediaServiceFactory,
+    OnvifPreviewController Function()? previewFactory,
   })  : _soap = soap ?? const OnvifSoap(),
-        _httpClientFactory = httpClientFactory ?? OnvifHttpClient.new;
+        _httpClientFactory = httpClientFactory ?? OnvifHttpClient.new,
+        _mediaServiceFactory = mediaServiceFactory ?? OnvifMediaService.new,
+        _previewFactory = previewFactory ?? RtspPreview.new;
 
   /// Connection details. When constructed via a zero-arg factory (registry
   /// tear-off), this is `null` and must be supplied before [open].
@@ -65,12 +84,22 @@ class ONVIFCameraAdapter extends CameraAdapter {
   /// reused, so a later [open] needs a new one. Overridable for tests.
   final OnvifHttpClient Function() _httpClientFactory;
 
+  /// Builds the [OnvifMediaService] used to resolve the RTSP stream URI.
+  /// Overridable for tests.
+  final OnvifMediaServiceFactory _mediaServiceFactory;
+
+  /// Builds the preview player. Overridable for tests, so unit tests never
+  /// have to touch a real media_kit/native player.
+  final OnvifPreviewController Function() _previewFactory;
+
   OnvifHttpClient? _httpClient;
+  OnvifPreviewController? _preview;
   bool _isOpen = false;
 
   static Never _planned() => throw UnimplementedError(
         'This ONVIF capability is planned — see ROADMAP v1.1. '
-        'Auth (open/close) is implemented; media/discovery/PTZ are not yet.',
+        'Auth, media service, and RTSP preview are implemented; '
+        'capture/PTZ/discovery are not yet.',
       );
 
   @override
@@ -104,9 +133,30 @@ class ONVIFCameraAdapter extends CameraAdapter {
         timeout: timeout,
       );
       _validateDeviceInformationResponse(responseBody);
+
+      final mediaService = _mediaServiceFactory(
+        host: creds.host,
+        port: creds.port,
+        username: creds.username,
+        password: creds.password,
+        httpClient: httpClient,
+      );
+      final profiles = await mediaService.getProfiles(timeout: timeout);
+      if (profiles.isEmpty) {
+        throw StateError('ONVIF device reported no media profiles.');
+      }
+      final streamUri = await mediaService.getStreamUri(
+        profiles.first.token,
+        timeout: timeout,
+      );
+
+      final preview = _previewFactory();
+      await preview.open(streamUri, timeout: timeout);
+      _preview = preview;
+
       _isOpen = true;
     } catch (_) {
-      // open() failed: don't leave a dangling client behind.
+      // open() failed: don't leave a dangling client/preview behind.
       await close();
       rethrow;
     }
@@ -136,6 +186,11 @@ class ONVIFCameraAdapter extends CameraAdapter {
 
   @override
   Future<void> close() async {
+    final preview = _preview;
+    _preview = null;
+    if (preview != null) {
+      await preview.dispose();
+    }
     _httpClient?.close();
     _httpClient = null;
     _isOpen = false;
@@ -148,7 +203,16 @@ class ONVIFCameraAdapter extends CameraAdapter {
   CameraCapabilities get capabilities => _planned();
 
   @override
-  Widget buildPreview() => _planned();
+  Widget buildPreview() {
+    if (!_isOpen) {
+      throw StateError('ONVIFCameraAdapter is not open. Call open(device) first.');
+    }
+    final preview = _preview;
+    if (preview == null) {
+      throw StateError('ONVIFCameraAdapter has no active preview.');
+    }
+    return preview.buildWidget();
+  }
 
   @override
   Future<Uint8List> captureFrame({Duration timeout = kDefaultCameraTimeout}) async => _planned();

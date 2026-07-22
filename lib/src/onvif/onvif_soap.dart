@@ -36,6 +36,13 @@ class WsUsernameToken {
   final String passwordDigestBase64;
 }
 
+/// XML namespace for ONVIF Device service actions (e.g. `GetDeviceInformation`).
+const String onvifDeviceNamespace = 'http://www.onvif.org/ver10/device/wsdl';
+
+/// XML namespace for ONVIF Media service actions (e.g. `GetProfiles`,
+/// `GetStreamUri`).
+const String onvifMediaNamespace = 'http://www.onvif.org/ver10/media/wsdl';
+
 /// Builds ONVIF SOAP envelopes and their WS-Security header.
 class OnvifSoap {
   const OnvifSoap();
@@ -64,12 +71,21 @@ class OnvifSoap {
   }
 
   /// Builds a SOAP 1.2 envelope for [action] with an optional [body] (already
-  /// XML-escaped element name/value pairs) and an optional [token] security
-  /// header.
+  /// XML-escaped element name/value pairs), or a pre-built [bodyXml] fragment
+  /// for actions that need nested elements (e.g. `GetStreamUri`'s
+  /// `StreamSetup`), and an optional [token] security header.
+  ///
+  /// [namespace] selects which ONVIF service the action belongs to (Device by
+  /// default; pass [onvifMediaNamespace] for Media service actions).
+  ///
+  /// Only one of [body]/[bodyXml] should be supplied; [bodyXml] wins if both
+  /// are given.
   String buildEnvelope(
     String action, {
     Map<String, String>? body,
+    String? bodyXml,
     WsUsernameToken? token,
+    String namespace = onvifDeviceNamespace,
   }) {
     final security = token == null
         ? ''
@@ -83,18 +99,46 @@ class OnvifSoap {
         </UsernameToken>
       </Security>
 ''';
-    final bodyFields = (body ?? const {})
-        .entries
-        .map((e) => '<${e.key}>${_escape(e.value)}</${e.key}>')
-        .join();
+    final bodyFields = bodyXml ??
+        (body ?? const {})
+            .entries
+            .map((e) => '<${e.key}>${_escape(e.value)}</${e.key}>')
+            .join();
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
   <soap:Header>
 $security  </soap:Header>
   <soap:Body>
-    <$action xmlns="http://www.onvif.org/ver10/device/wsdl">$bodyFields</$action>
+    <$action xmlns="$namespace">$bodyFields</$action>
   </soap:Body>
 </soap:Envelope>''';
+  }
+
+  /// Builds the `GetProfiles` envelope (Media service).
+  String getProfilesEnvelope({WsUsernameToken? token}) => buildEnvelope(
+        'GetProfiles',
+        token: token,
+        namespace: onvifMediaNamespace,
+      );
+
+  /// Builds the `GetStreamUri` envelope for [profileToken] (Media service),
+  /// requesting an RTP-Unicast RTSP stream over TCP transport.
+  String getStreamUriEnvelope(String profileToken, {WsUsernameToken? token}) {
+    const schema = 'http://www.onvif.org/ver10/schema';
+    final bodyXml = '''
+<StreamSetup xmlns="$schema">
+  <Stream xmlns="$schema">RTP-Unicast</Stream>
+  <Transport xmlns="$schema">
+    <Protocol>RTSP</Protocol>
+  </Transport>
+</StreamSetup>
+<ProfileToken>${_escape(profileToken)}</ProfileToken>''';
+    return buildEnvelope(
+      'GetStreamUri',
+      bodyXml: bodyXml,
+      token: token,
+      namespace: onvifMediaNamespace,
+    );
   }
 
   static String _escape(String value) => value

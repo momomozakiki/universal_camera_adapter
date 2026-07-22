@@ -20,8 +20,11 @@ rather than re-inventing it.
 
 **Epic 2 update (2026-07-22):** WS-UsernameToken (PasswordDigest) + HTTP Digest auth landed —
 `ONVIFCameraAdapter.open()`/`close()`/`isOpen` are real (hand-rolled SOAP via `http`+`xml`, not the
-pub.dev `onvif` package; validated with a `GetDeviceInformation` probe). `listDevices()`,
-`capabilities`, `buildPreview()`, `captureFrame()`, and PTZ remain `_planned()`. An external
+pub.dev `onvif` package; validated with a `GetDeviceInformation` probe). Media service
+(`GetProfiles`/`GetStreamUri`) + RTSP preview via `media_kit` landed the same day: `open()` now also
+resolves the first media profile's RTSP URI and opens a `media_kit`-backed preview player, so
+`buildPreview()` is real too. `listDevices()`, `capabilities`, `captureFrame()`, and PTZ remain
+`_planned()`. An external
 "zero-assumption ONVIF" integration guide was reviewed and rejected everywhere it conflicted with
 already-shipped decisions (EZVIZ's cloud-account auth is not admin+verification-code; RTSP preview
 is `media_kit`, not `flutter_vlc_player`; caching belongs in Epic 2.5's `CameraProfileStore`/
@@ -65,7 +68,12 @@ separate, later plan.
 - [x] WS-UsernameToken (PasswordDigest) + HTTP Digest auth. **(done 2026-07-22 —
       `lib/src/onvif/onvif_soap.dart`, `onvif_http_client.dart`,
       `onvif_camera_adapter.dart`; `open()`/`close()`/`isOpen` are real.)**
-- [ ] Media service (GetProfiles, GetStreamUri) + RTSP preview via `media_kit` (TCP).
+- [x] Media service (GetProfiles, GetStreamUri) + RTSP preview via `media_kit` (TCP).
+      **(done 2026-07-22 — `onvif_media_service.dart` (real `GetProfiles`/`GetStreamUri`, with an
+      `OnvifMediaServiceBase` seam for tests) + `rtsp_preview.dart` (`media_kit`/`media_kit_video`,
+      forces `rtsp-transport=tcp`, behind an `OnvifPreviewController` seam); `open()` now resolves
+      the main profile's stream URI and opens the preview player, `buildPreview()` is real. Manual
+      sanity against real hardware still pending — no ONVIF device available in this environment.)**
 - [ ] PTZ AbsoluteMove (pan/tilt/zoom); snapshot via GetSnapshotUri.
 - [ ] WS-Discovery (optional auto-discovery) + manual IP input.
 - [ ] Input-hardening pass on all SOAP/XML/RTSP parsing.

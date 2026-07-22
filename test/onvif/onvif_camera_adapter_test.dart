@@ -1,10 +1,50 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 import 'package:universal_camera_adapter/src/onvif/onvif_http_client.dart';
+import 'package:universal_camera_adapter/src/onvif/onvif_media_service.dart';
+import 'package:universal_camera_adapter/src/onvif/rtsp_preview.dart';
+
+/// A working fake media service: this test file is about the auth flow
+/// (WS-UsernameToken/Digest), not GetProfiles/GetStreamUri, so [open] should
+/// sail through media resolution by default. Tests that care about media
+/// failures live in `onvif_media_service_test.dart`.
+class _FakeMediaService implements OnvifMediaServiceBase {
+  _FakeMediaService({Uri? streamUri})
+      : streamUri = streamUri ?? Uri.parse('rtsp://192.168.0.107:554/stream1');
+
+  final Uri streamUri;
+
+  @override
+  Future<List<OnvifProfile>> getProfiles({Duration timeout = kDefaultCameraTimeout}) async =>
+      const [OnvifProfile(token: 'profile1', name: 'Main')];
+
+  @override
+  Future<Uri> getStreamUri(String profileToken, {Duration timeout = kDefaultCameraTimeout}) async =>
+      streamUri;
+}
+
+/// A no-op fake preview player — no real media_kit/native player in unit tests.
+class _FakePreview implements OnvifPreviewController {
+  bool opened = false;
+  Uri? openedUri;
+
+  @override
+  Future<void> open(Uri streamUri, {Duration timeout = kDefaultCameraTimeout}) async {
+    opened = true;
+    openedUri = streamUri;
+  }
+
+  @override
+  Widget buildWidget() => const SizedBox.shrink();
+
+  @override
+  Future<void> dispose() async {}
+}
 
 const _deviceInfoSuccess = '''<?xml version="1.0" encoding="UTF-8"?>
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
@@ -31,6 +71,15 @@ ONVIFCameraAdapter _adapterWith(http.Client client) => ONVIFCameraAdapter(
         password: 'ABCDEF',
       ),
       httpClientFactory: () => OnvifHttpClient(client: client),
+      mediaServiceFactory: ({
+        required host,
+        required port,
+        username,
+        password,
+        required httpClient,
+      }) =>
+          _FakeMediaService(),
+      previewFactory: _FakePreview.new,
     );
 
 void main() {
