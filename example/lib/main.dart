@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import 'adapter_types.dart';
+import 'camera_bridge_tab.dart';
 import 'camera_session.dart';
 import 'ezviz/ezviz_camera_adapter.dart';
-import 'ezviz/ezviz_setup_wizard.dart';
 import 'tabs/barcode_scanner_tab.dart';
 import 'tabs/gallery_tab.dart';
 import 'tabs/preview_tab.dart';
@@ -65,7 +65,7 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
     'Barcode scanner',
     'Gallery',
     'PTZ / Zoom',
-    'EZVIZ bridge',
+    'Camera bridge',
   ];
 
   @override
@@ -92,7 +92,7 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
       BarcodeScannerTab(session: _session, active: _index == 2),
       GalleryTab(session: _session),
       PtzTab(session: _session),
-      EzvizSetupWizard(session: _session),
+      CameraBridgeTab(session: _session),
     ];
 
     return Scaffold(
@@ -135,9 +135,9 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
             label: 'PTZ',
           ),
           NavigationDestination(
-            icon: Icon(Icons.cloud_outlined),
-            selectedIcon: Icon(Icons.cloud),
-            label: 'EZVIZ',
+            icon: Icon(Icons.hub_outlined),
+            selectedIcon: Icon(Icons.hub),
+            label: 'Bridge',
           ),
         ],
       ),

@@ -9,6 +9,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
 /// Maximum SOAP response body accepted before it's handed to the XML parser.
@@ -27,9 +28,30 @@ const String onvifMediaServicePath = '/onvif/media_service';
 /// plaintext (WS-UsernameToken sends only the SHA1 digest; the HTTP Digest
 /// fallback sends only the RFC 2617 `response` hash).
 class OnvifHttpClient {
-  OnvifHttpClient({http.Client? client}) : _client = client ?? http.Client();
+  OnvifHttpClient({http.Client? client, this.verboseLogging = false})
+      : _client = client ?? http.Client();
 
   final http.Client _client;
+
+  /// When true, prints each request envelope and response (status + body,
+  /// truncated) to the console via [debugPrint]. Off by default — intended
+  /// for manual hardware debugging, not routine use.
+  ///
+  /// Safe to log verbatim: WS-Security sends only a SHA1 password *digest*
+  /// (see `onvif_soap.dart`'s `wsUsernameToken`), and the HTTP-Digest
+  /// fallback's `Authorization` header (built below in
+  /// [_buildDigestHeader]) contains only an RFC 2617 response *hash* — the
+  /// raw password is never present in either the envelope or the response,
+  /// so nothing needs to be redacted before logging.
+  final bool verboseLogging;
+
+  static const int _maxLoggedBodyLength = 4000;
+
+  static void _logBody(String label, String body) {
+    final truncated = body.length > _maxLoggedBodyLength;
+    final shown = truncated ? body.substring(0, _maxLoggedBodyLength) : body;
+    debugPrint('[ONVIF] $label${truncated ? ' (truncated)' : ''}:\n$shown');
+  }
 
   /// POSTs [envelope] to `http://$host:$port$path` ([path] defaults to the
   /// Device service endpoint; pass [onvifMediaServicePath] for Media service
@@ -105,6 +127,9 @@ class OnvifHttpClient {
     if (extraHeaders != null) {
       request.headers.addAll(extraHeaders);
     }
+    if (verboseLogging) {
+      _logBody('POST $uri', envelope);
+    }
 
     final http.StreamedResponse streamed;
     try {
@@ -133,8 +158,12 @@ class OnvifHttpClient {
       throw StateError('ONVIF response read failed: $e');
     }
 
+    final bytes = builder.takeBytes();
+    if (verboseLogging) {
+      _logBody('Response ${streamed.statusCode}', utf8.decode(bytes, allowMalformed: true));
+    }
     return http.Response.bytes(
-      builder.takeBytes(),
+      bytes,
       streamed.statusCode,
       headers: streamed.headers,
     );

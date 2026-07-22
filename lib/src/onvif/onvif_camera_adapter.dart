@@ -64,18 +64,25 @@ class OnvifCredentials {
 class ONVIFCameraAdapter extends CameraAdapter {
   ONVIFCameraAdapter({
     this.credentials,
+    this.verboseLogging = false,
     OnvifSoap? soap,
     OnvifHttpClient Function()? httpClientFactory,
     OnvifMediaServiceFactory? mediaServiceFactory,
     OnvifPreviewController Function()? previewFactory,
   })  : _soap = soap ?? const OnvifSoap(),
-        _httpClientFactory = httpClientFactory ?? OnvifHttpClient.new,
+        _httpClientFactory =
+            httpClientFactory ?? (() => OnvifHttpClient(verboseLogging: verboseLogging)),
         _mediaServiceFactory = mediaServiceFactory ?? OnvifMediaService.new,
         _previewFactory = previewFactory ?? RtspPreview.new;
 
   /// Connection details. When constructed via a zero-arg factory (registry
   /// tear-off), this is `null` and must be supplied before [open].
   final OnvifCredentials? credentials;
+
+  /// When true (and no [httpClientFactory] override is supplied), the
+  /// default [OnvifHttpClient] logs each request/response to the console.
+  /// Off by default — intended for manual hardware debugging.
+  final bool verboseLogging;
 
   final OnvifSoap _soap;
 
