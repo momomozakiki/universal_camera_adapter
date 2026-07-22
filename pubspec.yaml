@@ -20,14 +20,15 @@ dependencies:
   camera: ^0.12.0
 
   # --- ONVIF / IP-camera backend dependencies (added in v1.1) ---
-  # Deliberately NOT declared yet: the ONVIF backend is scaffolding only
-  # (throws UnimplementedError) and pulls no packages, so consumers of the
-  # local-camera path don't drag in a heavy native RTSP stack. When v1.1
-  # implements ONVIF, add:
-  #   http: ^1.6.0            # SOAP requests
-  #   xml: ^7.0.0             # SOAP/XML parsing
-  #   media_kit: ^1.2.0       # RTSP preview (native)
-  #   media_kit_video: ^2.0.0 # RTSP video widget
+  # WS-UsernameToken/HTTP Digest auth landed (2026-07-22): http + xml + crypto
+  # are now real deps. media_kit is still deliberately deferred until the
+  # media-service/RTSP-preview step lands, so consumers of the local-camera
+  # path don't drag in a native RTSP stack before it's needed.
+  http: ^1.6.0 # ONVIF SOAP requests
+  xml: ^7.0.0 # ONVIF SOAP/XML parsing
+  crypto: ^3.0.0 # WS-UsernameToken PasswordDigest (SHA1) + HTTP Digest (MD5)
+  # media_kit: ^1.2.0       # RTSP preview (native) — deferred to media-service step
+  # media_kit_video: ^2.0.0 # RTSP video widget — deferred to media-service step
 
 dev_dependencies:
   flutter_test:

@@ -18,6 +18,18 @@ cloud dependency) — at lower priority in parallel. Epic 2.5 (discovery/feature
 wizard foundation) can now extend the minimal `CameraSession.switchTo()` that already landed,
 rather than re-inventing it.
 
+**Epic 2 update (2026-07-22):** WS-UsernameToken (PasswordDigest) + HTTP Digest auth landed —
+`ONVIFCameraAdapter.open()`/`close()`/`isOpen` are real (hand-rolled SOAP via `http`+`xml`, not the
+pub.dev `onvif` package; validated with a `GetDeviceInformation` probe). `listDevices()`,
+`capabilities`, `buildPreview()`, `captureFrame()`, and PTZ remain `_planned()`. An external
+"zero-assumption ONVIF" integration guide was reviewed and rejected everywhere it conflicted with
+already-shipped decisions (EZVIZ's cloud-account auth is not admin+verification-code; RTSP preview
+is `media_kit`, not `flutter_vlc_player`; caching belongs in Epic 2.5's `CameraProfileStore`/
+`CameraSecretStore`, not raw `SharedPreferences`) — only its WS-UsernameToken/HTTP-Digest auth shape
+was adopted, translated to this project's typed-error/`OnvifCredentials` conventions. A follow-up
+3-mode setup wizard (Cloud/ONVIF/AP-camera-WiFi) was requested but deliberately deferred to a
+separate, later plan.
+
 ---
 
 ## Epic 0 — Adopt the self-correcting workflow & repo practices  *(done)*
@@ -50,7 +62,9 @@ rather than re-inventing it.
 
 - [x] Scaffolding: `lib/src/onvif/` stubs (adapter, SOAP, media service, RTSP preview) that compile
       and register but throw `UnimplementedError`. **(done — v1.0 + scaffolding pass)**
-- [ ] WS-UsernameToken (PasswordDigest) + HTTP Digest auth.
+- [x] WS-UsernameToken (PasswordDigest) + HTTP Digest auth. **(done 2026-07-22 —
+      `lib/src/onvif/onvif_soap.dart`, `onvif_http_client.dart`,
+      `onvif_camera_adapter.dart`; `open()`/`close()`/`isOpen` are real.)**
 - [ ] Media service (GetProfiles, GetStreamUri) + RTSP preview via `media_kit` (TCP).
 - [ ] PTZ AbsoluteMove (pan/tilt/zoom); snapshot via GetSnapshotUri.
 - [ ] WS-Discovery (optional auto-discovery) + manual IP input.

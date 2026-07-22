@@ -16,17 +16,21 @@ void main() {
       await adapter.close(); // must not throw
     });
 
-    test('functional methods throw UnimplementedError (planned v1.1)', () async {
+    test('still-planned methods throw UnimplementedError (media/PTZ, v1.1+)', () async {
       final adapter = ONVIFCameraAdapter(
         credentials: const OnvifCredentials(host: '192.168.1.100'),
       );
       await expectLater(adapter.listDevices(), throwsUnimplementedError);
-      await expectLater(
-        adapter.open(const CameraDevice(id: 'x', name: 'x')),
-        throwsUnimplementedError,
-      );
       expect(() => adapter.capabilities, throwsUnimplementedError);
       expect(adapter.buildPreview, throwsUnimplementedError);
+    });
+
+    test('open() throws StateError when credentials are not supplied', () async {
+      final adapter = ONVIFCameraAdapter();
+      await expectLater(
+        adapter.open(const CameraDevice(id: 'x', name: 'x')),
+        throwsA(isA<StateError>()),
+      );
     });
 
     test('credentials redact the password in toString', () {
