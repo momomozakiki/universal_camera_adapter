@@ -22,7 +22,8 @@ dependencies:
   image: ^4.3.0
   flutter_zxing: ^2.2.0
   # Native EZVIZ player + per-user login (wraps EZVIZ's own Android/iOS SDKs),
-  # used only by the EZVIZ test tab (example/lib/tabs/ezviz_tab.dart). Each
+  # used by EzvizCameraAdapter (example/lib/ezviz/ezviz_camera_adapter.dart)
+  # and its setup wizard (example/lib/ezviz/ezviz_setup_wizard.dart). Each
   # user signs in via EzvizAuthManager.openLoginPage (EZVIZ's own hosted login
   # page - this app never sees a password); the native SDK caches the
   # resulting access token itself, so no token/credential storage of our own
@@ -40,12 +41,15 @@ dependencies:
   # third_party/ezviz_flutter/android/.../EzvizManager.kt.
   ezviz_flutter:
     path: third_party/ezviz_flutter
-  # Persists the EZVIZ tab's verification-code field across app restarts
-  # (example/lib/tabs/ezviz_tab.dart) - a testing convenience only, not a
-  # credential (the SDK's own native cache handles the actual access token).
+  # Persists the EZVIZ setup wizard's verification-code field across app
+  # restarts (example/lib/ezviz/ezviz_setup_wizard.dart) - a testing
+  # convenience only, not a credential (the SDK's own native cache handles
+  # the actual access token).
   shared_preferences: ^2.5.5
 
 dev_dependencies:
+  flutter_test:
+    sdk: flutter
   flutter_lints: ^6.0.0
 
 flutter:

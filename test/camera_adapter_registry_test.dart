@@ -67,6 +67,13 @@ void main() {
       expect(() => registry.registeredTypes.add('x'), throwsUnsupportedError);
     });
 
+    test('defaultType reflects the registered default', () {
+      registry.register('a', MockCameraAdapter.new);
+      expect(registry.defaultType, isNull);
+      registry.register('b', MockCameraAdapter.new, asDefault: true);
+      expect(registry.defaultType, 'b');
+    });
+
     test('two registries are isolated', () {
       final r1 = CameraAdapterRegistry()..register('only1', MockCameraAdapter.new);
       final r2 = CameraAdapterRegistry();

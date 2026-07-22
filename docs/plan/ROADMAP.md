@@ -3,23 +3,20 @@
 The canonical, checkable "where are we" tracker. Follow it top-down; update the status boxes and
 commit note as each item is verified and committed. This supersedes ad-hoc status notes.
 
-**Next action:** Epic 2.6 (EZVIZ) — `EzvizCameraAdapter` now exists (2026-07-22,
-`example/lib/ezviz/ezviz_camera_adapter.dart`), implementing the full `CameraAdapter` contract on
-top of the native per-user login already verified on real hardware. It deliberately lives in the
-**example app**, not the main `lib/` package: `pub publish` rejects path/git dependencies, and
-`ezviz_flutter` is only usable via the vendored, patched copy today (see the vendor-now decision
-below). It's registered in the example registry as `'ezviz'` but not yet selectable from the
-bottom-nav toolkit. Remaining work, in order: (1) build `EzvizSetupWizard` + wire session-switching
-so `EzvizCameraAdapter` is actually reachable from the UI; (2) patch the vendored `capturePicture`
-so `captureFrame()` starts returning real bytes instead of its current clear `StateError`; (3)
-retire `example/lib/tabs/ezviz_tab.dart` once the wizard fully replaces it; (4) file the upstream
-`ezviz_flutter` PR (non-blocking); (5) decide bridge/doc retirement timing for
+**Next action:** Epic 2.6 (EZVIZ) — `EzvizCameraAdapter` is now reachable from the bottom-nav
+toolkit (2026-07-22): `EzvizSetupWizard` (`example/lib/ezviz/ezviz_setup_wizard.dart`) drives
+sign-in → device list → verification code → handoff into the shared `CameraSession` via a new
+minimal, registry-based `CameraSession.switchTo()`/`openDevice()` (no `CameraProfile`/persistence
+stack — that's Epic 2.5's job), and `example/lib/tabs/ezviz_tab.dart` has been retired. Remaining
+work, in order: (1) patch the vendored `capturePicture` so `captureFrame()` starts returning real
+bytes instead of its current clear `StateError`; (2) file the upstream `ezviz_flutter` PR
+(non-blocking); (3) decide bridge/doc retirement timing for
 `scripts/ezviz_bridge.py`/`ezviz-integration-notes.md` — unblocked (native flow fully confirmed)
 but needs your sign-off, not unilateral action. Epic 2 (ONVIF) remains on the roadmap — a
 different, complementary problem (open-standard access to *any* ONVIF-compliant IP camera, no
 cloud dependency) — at lower priority in parallel. Epic 2.5 (discovery/feature-matrix/profiles/
-wizard foundation) can proceed alongside either, and is now a hard prerequisite for making
-`EzvizCameraAdapter` UI-reachable.
+wizard foundation) can now extend the minimal `CameraSession.switchTo()` that already landed,
+rather than re-inventing it.
 
 ---
 
@@ -63,6 +60,12 @@ wizard foundation) can proceed alongside either, and is now a hard prerequisite 
 
 Foundation for multi-backend discovery, capabilities, and setup UI (all backends benefit; can proceed
 in parallel with Epic 2's completion).
+
+> **Note (2026-07-22):** a minimal, in-memory `CameraSession.switchTo(type)` +
+> `CameraSession.openDevice(device)` already landed as part of Epic 2.6 (registry-based backend
+> switching only — no `CameraProfile`/`CameraProfileStore`/`CameraSecretStore`). The
+> `CameraSetupWizard` item below and any future profile/persistence work should extend that
+> mechanism rather than re-inventing adapter switching.
 
 - [ ] **`CameraFeature` enum** (zoom, pan, tilt, frameCapture, qrScanning, barcodeScanning,
       textRecognitionOcr, twoWayAudio, motionEvents as `unvalidated` placeholders for future epics).
@@ -144,14 +147,16 @@ and its verification work can proceed now.
       and `ezviz_flutter` is usable straight from pub.dev, or (b) a deliberate decision to vendor
       permanently is made (e.g. via a separate companion pub package) — tracked as a follow-up, not
       blocking.
-- [ ] **`EzvizSetupWizard`** implementing per-user onboarding flow (Steps 1–5 per
-      [`ezviz-setup-guide.md`](../camera/ezviz-setup-guide.md)) — needed before `EzvizCameraAdapter`
-      can be selected from the bottom-nav toolkit (requires `CameraSession.switchTo()` from Epic 2.5
-      too, or an equivalent).
+- [x] **`EzvizSetupWizard`** (2026-07-22, `example/lib/ezviz/ezviz_setup_wizard.dart`) implementing
+      per-user onboarding (sign-in → device list → verification code → handoff) — reachable from the
+      bottom-nav toolkit via a new minimal, registry-based `CameraSession.switchTo()`/`openDevice()`
+      (`example/lib/camera_session.dart`; no `CameraProfile`/persistence stack — that's Epic 2.5's
+      job). Playback itself stays owned by `EzvizCameraAdapter.buildPreview()`; once connected, the
+      wizard renders the same `PreviewTab` every other backend uses.
 - [ ] Feature matrix: zoom/pan/tilt queried per-device post-open; frameCapture resolved via spike;
       scanning features gated by frameCapture.
-- [ ] Retire `example/lib/tabs/ezviz_tab.dart` (diagnostic bridge tab) once the setup wizard +
-      session-switching UI can fully replace its sign-in/device-list/playback flow.
+- [x] Retire `example/lib/tabs/ezviz_tab.dart` (diagnostic bridge tab) (2026-07-22) — fully replaced
+      by `EzvizSetupWizard` + session-switching.
 - [ ] Update `ezviz-setup-guide.md`: move from "planned" to "validated" once end-to-end tested.
 
 ## Epic 3 — v1.2 / v1.3 (future)

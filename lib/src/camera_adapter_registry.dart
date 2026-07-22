@@ -75,6 +75,9 @@ class CameraAdapterRegistry {
   /// Whether a default backend has been registered.
   bool hasDefault() => _defaultType != null;
 
+  /// The registered type of the default backend, or null if none was set.
+  String? get defaultType => _defaultType;
+
   /// Whether a backend is registered under [type].
   bool isRegistered(String type) => _factories.containsKey(type);
 

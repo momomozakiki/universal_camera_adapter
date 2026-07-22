@@ -38,7 +38,9 @@ class EzvizCameraAdapter extends CameraAdapter {
 
   @override
   Future<List<CameraDevice>> listDevices() async {
-    final devices = await EzvizDeviceManager.getDeviceList();
+    final devices = await EzvizDeviceManager.getDeviceList().timeout(
+      kDefaultCameraTimeout,
+    );
     return devices.map(_toCameraDevice).toList(growable: false);
   }
 
@@ -83,7 +85,14 @@ class EzvizCameraAdapter extends CameraAdapter {
     _verificationCode = null;
     if (controller == null) return;
     controller.removePlayerEventHandler();
-    await controller.stopRealPlay();
+    // NOT awaited: like initPlayerByDevice/setPlayVerifyCode/startRealPlay,
+    // the vendored native stopRealPlay handler (EzvizView.kt) never calls
+    // result.success()/result.error() — awaiting it here hangs this Future
+    // forever, which wedges CameraSession's serialized call queue for the
+    // rest of the session (every later open/close/capture stalls in "busy").
+    // Confirmed via the same class of bug already documented for the other
+    // three calls in ezviz-setup-guide.md.
+    unawaited(controller.stopRealPlay());
     await controller.release();
   }
 
@@ -107,7 +116,17 @@ class EzvizCameraAdapter extends CameraAdapter {
     if (device == null || accessToken == null) {
       throw StateError('EzvizCameraAdapter: no device is open.');
     }
-    return EzvizPlayer(onCreated: (controller) => _onPlayerCreated(controller, device));
+    // Unlike package:camera's CameraPreview (which wraps itself in an
+    // AspectRatio internally), EzvizPlayer is a bare platform view with no
+    // intrinsic size — given unbounded constraints (e.g. inside PreviewTab's
+    // scrollable Column), it renders with a nonsensical size and overlays
+    // other widgets instead of showing video. Wrap it here so every caller
+    // gets a self-contained, properly sized widget, matching what the
+    // retired ezviz_tab.dart did manually.
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: EzvizPlayer(onCreated: (controller) => _onPlayerCreated(controller, device)),
+    );
   }
 
   /// Mirrors `tabs/ezviz_tab.dart`'s `_EzvizNativePlayerState._onPlayerCreated`:

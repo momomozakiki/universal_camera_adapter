@@ -1,6 +1,6 @@
 ---
 title: EZVIZ Camera Setup Guide (Per-User On-Device)
-version: 1.0
+version: 1.2
 last_validated: 2026-07-22
 official: false
 source: project-internal
@@ -10,12 +10,14 @@ applies_when: "Implementing the EzvizCameraAdapter or onboarding EZVIZ cameras i
 
 # EZVIZ camera setup guide (per-user, on-device)
 
-**Version 1.0** — *verified on-device login and device-specific verification codes, replacing the
+**Version 1.2** — *verified on-device login and device-specific verification codes, replacing the
 bridge-based diagnostic approach.*
 
 ## Revision History
 | Version | Date       | Change   |
 |---------|------------|----------|
+| 1.2     | 2026-07-22 | Documented the `stopRealPlay` hang (found live, fixed in `EzvizCameraAdapter.close()`) alongside the 3 already-known non-replying calls; added a "latent landmines" list of 7 more never-replying native calls found by a follow-up audit, currently unused by this repo's own code. |
+| 1.1     | 2026-07-22 | Fixed Step 5's sample to match `CameraAdapter.open()`'s real signature (no `verificationCode` parameter — travels via `device.metadata`); noted the actual pre-Epic-2.5 flow is `EzvizSetupWizard` + `CameraSession.switchTo`/`openDevice`. |
 | 1.0     | 2026-07-22 | Initial; documents native SDK hosted login mechanism (confirmed working on real hardware). |
 
 ## Why a per-user approach
@@ -95,18 +97,30 @@ to `shared_preferences`.
 
 ### Step 5 (connect)
 
+> **Today (pre-Epic-2.5):** the actual selectable flow is `EzvizSetupWizard` →
+> `CameraSession.switchTo('ezviz')` → `CameraSession.openDevice(device)`, with the verification code
+> embedded directly in `device.metadata['verificationCode']` — see
+> `example/lib/ezviz/ezviz_setup_wizard.dart`. There is no `CameraProfile`/`secretStore` yet; the
+> code is kept in plaintext `SharedPreferences` for now. The sample below is the **target design**
+> once Epic 2.5's profile/secret-store persistence lands, not current behavior — note in particular
+> that `CameraAdapter.open()` has no `verificationCode` parameter; it reads the code from the
+> device's own `metadata` map.
+
 When the user opens a saved EZVIZ camera profile:
 
 ```dart
 // Cameras tab reads the stored verification code (if any)
 final verificationCode = await secretStore.getSecret(profile.id, 'verification_code');
 
-// Create the adapter and open the device
+// Create the adapter and open the device — the code travels via metadata,
+// since CameraAdapter.open() has no dedicated parameter for it.
 final adapter = registry.create('ezviz');
-await adapter.open(
-  profile.device,
-  verificationCode: verificationCode,
-);
+final device = verificationCode == null
+    ? profile.device
+    : profile.device.copyWith(
+        metadata: {...profile.device.metadata, 'verificationCode': verificationCode},
+      );
+await adapter.open(device);
 
 // The adapter's buildPreview() and captureFrame() are now available
 ```
@@ -175,10 +189,16 @@ Dart's `EzvizDeviceInfo` deserializer expects.
 Two additional issues exist in the native Kotlin code (not fixed in the vendored plugin, only
 worked around):
 
-1. **`initPlayerByDevice`, `setPlayVerifyCode`, `startRealPlay` never call `result.success()`** —
-   awaiting these calls in Dart hangs indefinitely. Workaround: fire them sequentially without
+1. **`initPlayerByDevice`, `setPlayVerifyCode`, `startRealPlay`, and `stopRealPlay` never call
+   `result.success()`** — awaiting these calls in Dart hangs indefinitely. The first three were
+   caught during the original playback work; `stopRealPlay` was found later (2026-07-22) when
+   `EzvizCameraAdapter.close()` awaited `EzvizPlayerController.stopRealPlay()` and hung forever,
+   wedging `CameraSession`'s serialized call queue — every operation after the first `close()`
+   on an open EZVIZ device (Disconnect, switching backends, even the app's own dispose) stalled
+   in "busy" for the rest of the session. Workaround: fire all four sequentially without
    awaiting; rely on the separate event channel (wired via `setPlayerEventHandler`) to learn
-   success/failure.
+   success/failure. `release`/`playerRelease` is fine — its Dart wrapper never awaits the channel
+   call in the first place.
 
 2. **`EzvizSimplePlayer` (the plugin's convenience widget) has a logic bug** — it marks
    `_isPlayerInitialized = true` before calling `_initializePlayer()` (the only place that calls
@@ -188,6 +208,25 @@ worked around):
 
 These are known to exist in `ezviz_flutter` 1.2.7. Formal patches have **not yet been contributed
 upstream** — the vendored copy stays in this repo until that's decided/done.
+
+### Latent landmines: more never-replying native calls, currently unused
+
+A 2026-07-22 audit (prompted by the `stopRealPlay` discovery above) checked every method-channel
+call in the vendored plugin's Kotlin source for the same "native handler never calls
+`result.success()`/`result.error()`" pattern. Seven more methods have it, but are **not currently
+called anywhere in this repo's own code** (`EzvizCameraAdapter`/`EzvizSetupWizard`), so they're not
+active bugs today — only traps for a future contributor who adopts one of them and awaits its Dart
+wrapper the normal way:
+
+- `EzvizPlayerController.initPlayerByUrl`, `initPlayerByUser`, `startReplay`, `stopReplay`
+  (`ezviz_player.dart`, each `await`s its channel call; the matching `EzvizView.kt` branches never
+  reply — `initPlayerByUser`'s entire native body is commented out).
+- `EzvizManager.enableLog`, `enableP2P`, `setAccessToken` (`ezviz.dart`, each `await`s its channel
+  call; the matching `FlutterEzvizPlugin.kt` branches call a `result`-less native overload and never
+  reply).
+
+If any of these is ever adopted, apply the same workaround as the four calls above: fire it without
+`await` and rely on the event channel (if applicable) rather than the method call's own return value.
 
 ## Authentication and third-party identity providers
 
