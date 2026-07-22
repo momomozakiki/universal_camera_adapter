@@ -9,6 +9,14 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  # third_party/ezviz_flutter is a vendored copy of a pub.dev package (see
+  # example/pubspec.yaml's comment on the `ezviz_flutter` dependency) - it's
+  # third-party code we patch minimally for two confirmed native crashes, not
+  # code this project maintains stylistically, so it shouldn't be linted.
+  exclude:
+    - third_party/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

@@ -29,6 +29,22 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- The ezviz_flutter plugin's native SDK dependency (io.github.ezviz-open:ezviz-sdk)
+             ships these UI activities compiled into its classes.jar but ships an EMPTY
+             AndroidManifest.xml (confirmed: no <activity> entries at all) - so the host app
+             must declare them itself, or EzvizAuthManager.openLoginPage() fails at runtime with
+             "Unable to find explicit activity class {.../com.videogo.main.EzvizWebViewActivity}".
+             EzvizWebViewActivity is the one confirmed required (it's the hosted login page
+             itself); EZAuthHandleActivity is declared alongside it since it's part of the same
+             SDK's login/OAuth-callback path (referenced via the same IntentConsts/action
+             strings in the SDK's compiled classes). -->
+        <activity
+            android:name="com.videogo.main.EzvizWebViewActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize" />
+        <activity
+            android:name="com.ezviz.opensdk.auth.EZAuthHandleActivity"
+            android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

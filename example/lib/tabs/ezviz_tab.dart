@@ -1,22 +1,29 @@
-import 'dart:convert';
-
 import 'package:ezviz_flutter/ezviz_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Test surface for the EZVIZ Open Platform bridge (`scripts/ezviz_bridge.py`).
+/// This project's registered EZVIZ Open Platform AppKey - a public app
+/// identifier, not a secret. Confirmed from `ezviz_flutter`'s native side
+/// (`EzvizManager.kt: initSDK()`): only the AppKey is ever passed to
+/// `EZGlobalSDK.initLib(app, appKey)`; the AppSecret never appears anywhere
+/// in the native SDK init path (it's only used by the separate Open
+/// Platform REST `token/get` call this tab no longer makes). Every user of
+/// this app shares this one AppKey, the same way the official EZVIZ app
+/// bundles its own single key for all of its accounts - what's per-user is
+/// the access token obtained via [EzvizAuthManager.openLoginPage] below.
+const _kEzvizAppKey = '59c8ee7cf07e45c3bec8978950c3d484';
+
+/// Test surface for `ezviz_flutter`'s native per-user login + live-view.
 ///
-/// The bridge is EZVIZ-agnostic to this tab: it only ever returns a device
-/// list and the account's `appKey`/`accessToken`. Playback is handled by
-/// [_EzvizNativePlayer] below, a thin wrapper around `ezviz_flutter`'s
-/// low-level `EzvizPlayer`/`EzvizPlayerController` (not its `EzvizSimplePlayer`
-/// convenience widget - see that class's doc comment for why) - this tab
-/// holds no EZVIZ protocol logic itself beyond driving that small wrapper.
-///
-/// The bridge is tied to one EZVIZ account via server-side environment
-/// variables, so there is no login step here - this tab just lists that
-/// account's cameras and plays whichever one is tapped.
+/// Each user signs in with their own EZVIZ account via EZVIZ's own
+/// SDK-hosted login page ([EzvizAuthManager.openLoginPage]) - this app never
+/// sees a password. The native SDK caches the resulting access token itself
+/// (persists across restarts, refreshes silently), so this tab holds no
+/// credential storage of its own beyond the always-visible verification-code
+/// field for encrypted devices. Playback is handled by [_EzvizNativePlayer]
+/// below, a thin wrapper around `ezviz_flutter`'s low-level
+/// `EzvizPlayer`/`EzvizPlayerController` (not its `EzvizSimplePlayer`
+/// convenience widget - see that class's doc comment for why).
 class EzvizTab extends StatefulWidget {
   const EzvizTab({super.key});
 
@@ -24,78 +31,131 @@ class EzvizTab extends StatefulWidget {
   State<EzvizTab> createState() => _EzvizTabState();
 }
 
-enum _Step { devices, video }
+enum _Step { signIn, devices, video }
 
-class _EzvizDevice {
-  const _EzvizDevice({required this.serial, this.name, this.model});
-
-  final String serial;
-  final String? name;
-  final String? model;
-
-  factory _EzvizDevice.fromJson(Map<String, dynamic> json) => _EzvizDevice(
-    serial: json['serial'] as String,
-    name: json['name'] as String?,
-    model: json['model'] as String?,
-  );
-}
-
-class _EzvizTabState extends State<EzvizTab> {
-  static const _prefsBridgeHostKey = 'ezviz_tab.bridge_host';
+class _EzvizTabState extends State<EzvizTab> with WidgetsBindingObserver {
   static const _prefsCodeKey = 'ezviz_tab.verification_code';
 
-  final _bridgeHostController = TextEditingController(
-    text: '127.0.0.1:8765',
-  );
   final _codeController = TextEditingController();
 
-  _Step _step = _Step.devices;
+  _Step _step = _Step.signIn;
   bool _busy = false;
   String? _error;
 
-  List<_EzvizDevice> _devices = [];
-  String? _appKey;
+  /// Set right before [EzvizAuthManager.openLoginPage] launches the hosted
+  /// login page, cleared once we've checked for a token on the next resume.
+  /// Guards against re-checking on unrelated app resumes (e.g. switching
+  /// apps briefly while already on the device list).
+  bool _awaitingSignIn = false;
+
+  List<EzvizDeviceInfo> _devices = [];
   String? _accessToken;
-  _EzvizDevice? _playingDevice;
+  EzvizDeviceInfo? _playingDevice;
   String? _playerState;
 
-  /// Bumped every time the user taps "Connect". Feeds the [EzvizSimplePlayer]
-  /// key below so each tap forces a brand-new player instance - the plugin's
-  /// own initState is where the verification code is actually applied
-  /// (`_currentPassword = widget.encryptionPassword`), so reusing an existing
-  /// instance (e.g. the plugin's built-in "Retry" button) silently ignores
-  /// any code typed after that instance was first created.
+  /// Bumped every time the user taps "Connect". Feeds the
+  /// [_EzvizNativePlayer] key below so each tap forces a brand-new player
+  /// instance - the correct sequence (initPlayerByDevice -> setPlayVerifyCode
+  /// -> startRealPlay) only runs from a fresh instance's initState.
   int _connectAttempt = 0;
 
   @override
   void initState() {
     super.initState();
-    _restoreSavedFields();
+    WidgetsBinding.instance.addObserver(this);
+    _bootstrap();
   }
 
   @override
   void dispose() {
-    _bridgeHostController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     _codeController.dispose();
     super.dispose();
   }
 
-  Future<void> _restoreSavedFields() async {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _awaitingSignIn) {
+      _awaitingSignIn = false;
+      _checkSignInAfterResume();
+    }
+  }
+
+  /// `initSDK` must run *before* `getAccessToken` - confirmed via adb logcat:
+  /// calling `getAccessToken` first throws natively (`EZGlobalSDK.getInstance()`
+  /// is null until `initLib` has run), which the Dart wrapper swallows into a
+  /// plain `null`, so a cached-token check done first always looks empty.
+  /// `initSDK`'s native `initLib()` call restores any previously-persisted
+  /// token from the SDK's own local storage on its own; this tab's vendored
+  /// copy of `ezviz_flutter` (see `example/third_party/ezviz_flutter`) was
+  /// also patched to stop unconditionally overwriting that restored token
+  /// with an empty string, so calling `initSDK` here with `accessToken: ''`
+  /// is safe - it never destroys a real cached token.
+  Future<void> _bootstrap() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedHost = prefs.getString(_prefsBridgeHostKey);
     final savedCode = prefs.getString(_prefsCodeKey);
-    if (savedHost != null) _bridgeHostController.text = savedHost;
     if (savedCode != null) _codeController.text = savedCode;
+
+    await EzvizManager.shared().initSDK(
+      EzvizInitOptions(appKey: _kEzvizAppKey, accessToken: ''),
+    );
+    final cached = await EzvizAuthManager.getAccessToken();
+    if (cached != null) {
+      setState(() {
+        _accessToken = cached.accessToken;
+        _step = _Step.devices;
+      });
+      await _loadDevices();
+    } else {
+      setState(() => _step = _Step.signIn);
+    }
+  }
+
+  Future<void> _signIn() async {
+    setState(() => _error = null);
+    _awaitingSignIn = true;
+    // Deliberately no `areaId` - checked EzvizManager.kt's native handler
+    // directly: passing any areaId string gets discarded and replaced with a
+    // hardcoded `openLoginPage(0)` call, a plugin quirk. Omitting it takes
+    // the no-arg native path, the SDK's own default/auto-detect region.
+    final launched = await EzvizAuthManager.openLoginPage();
+    if (!launched) {
+      _awaitingSignIn = false;
+      setState(() => _error = 'Could not open the EZVIZ sign-in page.');
+    }
+  }
+
+  Future<void> _checkSignInAfterResume() async {
+    // The SDK may need a moment to finish writing its native cache after the
+    // login activity returns control to this app.
+    await Future.delayed(const Duration(milliseconds: 500));
+    final token = await EzvizAuthManager.getAccessToken();
+    if (token == null) {
+      setState(() => _error = 'Sign-in was cancelled or failed. Try again.');
+      return;
+    }
+    await EzvizManager.shared().initSDK(
+      EzvizInitOptions(appKey: _kEzvizAppKey, accessToken: token.accessToken),
+    );
+    setState(() {
+      _accessToken = token.accessToken;
+      _step = _Step.devices;
+    });
     await _loadDevices();
+  }
+
+  Future<void> _signOut() async {
+    await EzvizAuthManager.logout();
+    setState(() {
+      _accessToken = null;
+      _devices = [];
+      _step = _Step.signIn;
+    });
   }
 
   Future<void> _savePref(String key, String value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(key, value);
-  }
-
-  Uri _bridgeUri(String path, [Map<String, String>? query]) {
-    return Uri.http(_bridgeHostController.text.trim(), path, query);
   }
 
   Future<void> _loadDevices() async {
@@ -104,37 +164,10 @@ class _EzvizTabState extends State<EzvizTab> {
       _error = null;
     });
     try {
-      final devicesResponse = await http.get(_bridgeUri('/devices'));
-      final configResponse = await http.get(_bridgeUri('/config'));
-      final devicesBody = jsonDecode(devicesResponse.body) as Map<String, dynamic>;
-      final configBody = jsonDecode(configResponse.body) as Map<String, dynamic>;
-      if (devicesResponse.statusCode != 200) {
-        setState(
-          () => _error = devicesBody['error'] as String? ?? 'Could not list devices.',
-        );
-        return;
-      }
-      if (configResponse.statusCode != 200) {
-        setState(
-          () => _error = configBody['error'] as String? ?? 'Could not load account config.',
-        );
-        return;
-      }
-      final devices = (devicesBody['devices'] as List<dynamic>)
-          .cast<Map<String, dynamic>>()
-          .map(_EzvizDevice.fromJson)
-          .toList();
-      setState(() {
-        _devices = devices;
-        _appKey = configBody['appKey'] as String;
-        _accessToken = configBody['accessToken'] as String;
-      });
+      final devices = await EzvizDeviceManager.getDeviceList();
+      setState(() => _devices = devices);
     } catch (e) {
-      setState(
-        () => _error =
-            'Could not reach the bridge at ${_bridgeHostController.text}. '
-            'Is scripts/ezviz_bridge.py running? ($e)',
-      );
+      setState(() => _error = 'Could not load devices: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -154,7 +187,7 @@ class _EzvizTabState extends State<EzvizTab> {
     });
   }
 
-  void _openStream(_EzvizDevice device) {
+  void _openStream(EzvizDeviceInfo device) {
     setState(() {
       _playingDevice = device;
       _playerState = null;
@@ -184,6 +217,8 @@ class _EzvizTabState extends State<EzvizTab> {
   @override
   Widget build(BuildContext context) {
     switch (_step) {
+      case _Step.signIn:
+        return _buildSignInStep();
       case _Step.devices:
         return _buildDevicesStep();
       case _Step.video:
@@ -191,32 +226,53 @@ class _EzvizTabState extends State<EzvizTab> {
     }
   }
 
+  Widget _buildSignInStep() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.videocam_outlined, size: 48),
+            const SizedBox(height: 16),
+            const Text(
+              'Sign in with your own EZVIZ account to see your cameras. '
+              'This opens EZVIZ\'s own sign-in page - this app never sees '
+              'your password.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            FilledButton(
+              onPressed: _signIn,
+              child: const Text('Sign in with EZVIZ'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildDevicesStep() {
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _bridgeHostController,
-                decoration: const InputDecoration(
-                  labelText: 'Bridge host:port',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (value) => _savePref(_prefsBridgeHostKey, value),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _codeController,
-                decoration: const InputDecoration(
-                  labelText: 'Default verification code (only if encrypted)',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (value) => _savePref(_prefsCodeKey, value),
-              ),
-            ],
+          child: TextField(
+            controller: _codeController,
+            decoration: const InputDecoration(
+              labelText: 'Default verification code (only if encrypted)',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) => _savePref(_prefsCodeKey, value),
           ),
         ),
         Expanded(
@@ -232,13 +288,8 @@ class _EzvizTabState extends State<EzvizTab> {
                     final device = _devices[i];
                     return ListTile(
                       leading: const Icon(Icons.videocam_outlined),
-                      title: Text(device.name ?? device.serial),
-                      subtitle: Text(
-                        [
-                          device.serial,
-                          if (device.model != null) device.model!,
-                        ].join(' · '),
-                      ),
+                      title: Text(device.deviceName),
+                      subtitle: Text(device.deviceSerial),
                       onTap: _busy ? null : () => _openStream(device),
                     );
                   },
@@ -254,9 +305,22 @@ class _EzvizTabState extends State<EzvizTab> {
           ),
         Padding(
           padding: const EdgeInsets.all(16),
-          child: OutlinedButton(
-            onPressed: _busy ? null : _loadDevices,
-            child: const Text('Refresh devices'),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _busy ? null : _loadDevices,
+                  child: const Text('Refresh devices'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _signOut,
+                  child: const Text('Sign out'),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -265,10 +329,9 @@ class _EzvizTabState extends State<EzvizTab> {
 
   Widget _buildVideoStep() {
     final device = _playingDevice;
-    final appKey = _appKey;
     final accessToken = _accessToken;
     final code = _codeController.text.trim();
-    final ready = device != null && appKey != null && accessToken != null;
+    final ready = device != null && accessToken != null;
 
     return Column(
       children: [
@@ -277,7 +340,7 @@ class _EzvizTabState extends State<EzvizTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(device?.name ?? device?.serial ?? ''),
+              Text(device?.deviceName ?? device?.deviceSerial ?? ''),
               const SizedBox(height: 8),
               TextField(
                 controller: _codeController,
@@ -329,10 +392,10 @@ class _EzvizTabState extends State<EzvizTab> {
                     // a freshly-typed code reaches a fresh
                     // initPlayerByDevice/setPlayVerifyCode/startRealPlay
                     // sequence.
-                    key: ValueKey('${device.serial}::$code::$_connectAttempt'),
-                    appKey: appKey,
+                    key: ValueKey('${device.deviceSerial}::$code::$_connectAttempt'),
+                    appKey: _kEzvizAppKey,
                     accessToken: accessToken,
-                    deviceSerial: device.serial,
+                    deviceSerial: device.deviceSerial,
                     channelNo: 1,
                     verificationCode: code.isEmpty ? null : code,
                     onStateChanged: (state) =>
