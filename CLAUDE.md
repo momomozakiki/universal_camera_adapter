@@ -49,6 +49,8 @@ governs the area and load it. Available skills (`.claude/skills/`):
   backend (local, ONVIF/RTSP/PTZ).
 - **`dart-solid-principles`** — SOLID + everyday Dart practices (the *why* behind the design).
 - **`input-hardening`** — treat all external input (ONVIF SOAP/XML, RTSP, discovery) as untrusted.
+- **`state-management`** — any UI/state-bearing change must decide in-memory vs. persisted and
+  say so; don't let app state silently reset across rebuilds/restarts.
 - **`release-packaging`** — build → version → stage → verify for the pub package (`pub publish`,
   CHANGELOG) and the example APK (`scripts/build-apk.ps1`, versioned `dist/` copies + checksums).
 

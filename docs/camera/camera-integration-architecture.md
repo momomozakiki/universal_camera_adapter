@@ -79,3 +79,39 @@ ONVIF. See [`onvif-setup-guide.md`](onvif-setup-guide.md) for the planned networ
 Consumers depend only on `CameraAdapter` + `CameraAdapterRegistry`, never a concrete backend; they
 check `capabilities` at runtime to drive UI, always pair `open()` with `close()`, and handle the
 typed errors. This is what keeps every backend swappable and testable via `MockCameraAdapter`.
+
+## Planned extensions (v1.2+)
+
+The following foundational features are designed and documented, awaiting implementation:
+
+- **Discovery pipeline** ([`discovery-pipeline.md`](discovery-pipeline.md)) — three-stage staged
+  discovery (OS filtering → local hardware → network/cloud probes) with per-stage observable
+  status. Enables multi-backend discovery without blocking local results on slow network probes.
+  Introduces the optional `NetworkDiscoverable` mixin for backends supporting live-network
+  discovery (e.g., ONVIF WS-Discovery).
+
+- **Feature matrix** ([`feature-matrix.md`](feature-matrix.md)) — tri-state feature support model
+  (`unsupported` / `unvalidated` / `supported`) replacing flat boolean flags. Adds `CameraFeature`
+  enum, `CameraFeatureStatus`, `CameraFeatureBundle` lookup table, and `CameraFeatureMatrix` as an
+  additive getter on `CameraAdapter` (v1.2). `CameraCapabilities` is derived from the matrix for
+  backward compatibility. Enables querying "does this backend support zoom?" with more granularity
+  (tested vs. unvalidated vs. genuinely unsupported).
+
+- **Camera profiles** ([`camera-profiles.md`](camera-profiles.md)) — user-saved camera list with
+  secure-storage-backed secrets. `CameraProfile` (backend-agnostic metadata) + `CameraProfileStore`
+  (shared preferences, injectable) + `CameraSecretStore` (flutter_secure_storage, injectable).
+  Default-camera selection rules and fallback to live discovery. Fixes today's EZVIZ tab's
+  plaintext-storage issue.
+
+- **Modular add-camera wizard** ([`add-camera-wizard.md`](add-camera-wizard.md)) —
+  `CameraSetupWizardRegistry` parallel to `CameraAdapterRegistry`, decoupling setup UI from backend
+  logic. Enables the example app's Cameras tab to render wizard tiles automatically as backends are
+  registered, with zero hardcoded per-brand branching. Includes example app `CamerasTab`, secret
+  writing from wizard to secure store, and `CameraSession.switchTo()` for seamless camera switching.
+
+- **EzvizCameraAdapter (per-user, native login)** (v1.3, depends on profiles/wizard) — EZVIZ
+  backend using native SDK-hosted login (not bridge-based) with per-user tokens. Implements
+  corrected per-user onboarding ([`ezviz-setup-guide.md`](ezviz-setup-guide.md)) and resolves
+  platform-view frame-capture gap via `capturePicture` spike. Requires vendored, patched
+  `ezviz_flutter` (4 upstream bugs confirmed and fixed on real hardware, awaiting upstream porting
+  or long-term vendoring decision).

@@ -65,6 +65,7 @@ plan, await approval, continue.
 | New pattern / rule / gotcha | Append to `.ai/best_practices.md` (with example). |
 | New naming convention | Append to `.ai/naming_conventions.md`. |
 | Change to public API / architecture / data flow | Update `docs/*.md` (dated). |
+| New/changed UI state (screen, widget, selection, setting) | Apply [[state-management]]: decide in-memory vs. persisted, and say which in the PR/ledger entry. |
 | Doc created / updated | Apply the Documentation Standard: frontmatter (provenance + version) + `last_validated` refresh + a Revision History row; fold into a folder per §6.4 if it outgrows one question / its token budget, or its Revision History passes ~8 rows (relocate history to a sibling `CHANGELOG.md`). |
 | Non-obvious technical decision | Decision log in `plans/archive/<slug>/execution_log.md`. |
 | New significant directory with a distinct responsibility (large/monorepo projects) | Optionally add a `SCOPE.md` describing its role + DO/DON'T rules; link it from the parent's `SCOPE.md` (Progressive Disclosure Guide §3.1). Skip for small projects. |
