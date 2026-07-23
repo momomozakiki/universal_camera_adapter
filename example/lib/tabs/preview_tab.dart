@@ -17,7 +17,17 @@ class PreviewTab extends StatelessWidget {
       animation: session,
       builder: (context, _) {
         final theme = Theme.of(context);
+        // Enablement comes from the feature matrix (uniform across every
+        // backend); the numeric *range* comes from capabilities, the only place
+        // it exists. Capabilities may legitimately be **absent** — a backend can
+        // implement the matrix without the legacy struct (ONVIF today) — so the
+        // preview never depends on it, and only the zoom slider degrades.
         final caps = session.capabilities;
+        final zoomEnabled =
+            caps != null && session.supports(CameraFeature.zoom);
+        // Never assumed — a phone may report min == max.
+        final minZoom = caps?.minZoomLevel ?? 1.0;
+        final maxZoom = caps?.maxZoomLevel ?? 1.0;
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -71,7 +81,7 @@ class PreviewTab extends StatelessWidget {
                   padding: EdgeInsets.all(48),
                   child: Center(child: CircularProgressIndicator()),
                 )
-              else if (session.isOpen && caps != null) ...[
+              else if (session.isOpen) ...[
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: session.buildPreview(),
@@ -79,22 +89,16 @@ class PreviewTab extends StatelessWidget {
                 const SizedBox(height: 16),
                 Text('Zoom', style: theme.textTheme.titleSmall),
                 Slider(
-                  value: session.zoom.clamp(
-                    caps.minZoomLevel,
-                    caps.maxZoomLevel,
-                  ),
-                  min: caps.minZoomLevel,
-                  max: caps.maxZoomLevel,
-                  // Enablement comes from the feature matrix (uniform across
-                  // every backend); the numeric range still comes from
-                  // capabilities, which is the only place it exists. Never
-                  // assumed — a phone may report min == max.
-                  onChanged:
-                      session.supports(CameraFeature.zoom) ? session.setZoom : null,
+                  value: session.zoom.clamp(minZoom, maxZoom),
+                  min: minZoom,
+                  max: maxZoom,
+                  onChanged: zoomEnabled ? session.setZoom : null,
                 ),
-                if (!session.supports(CameraFeature.zoom))
+                if (!zoomEnabled)
                   Text(
-                    'This camera reports no zoom range.',
+                    caps == null
+                        ? 'This camera does not report a zoom range.'
+                        : 'This camera reports no zoom range.',
                     style: theme.textTheme.bodySmall,
                   ),
                 const SizedBox(height: 16),

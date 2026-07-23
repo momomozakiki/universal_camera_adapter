@@ -87,20 +87,41 @@ class CameraSession extends ChangeNotifier {
   String? _error;
   String? get error => _error;
 
-  double _zoom = 1;
+  /// Neutral zoom, used when the backend reports no zoom range at all (see
+  /// [capabilities]). Matches `CameraCapabilities`' own default.
+  static const double _defaultZoom = 1;
+
+  double _zoom = _defaultZoom;
   double get zoom => _zoom;
 
   bool _disposed = false;
 
   bool get isOpen => _adapter.isOpen;
 
-  /// Capabilities of the *open* device, or null when nothing is open (reading
-  /// [CameraAdapter.capabilities] before open throws by contract).
+  /// Capabilities of the *open* device, or null.
+  ///
+  /// Null means **either** nothing is open (reading [CameraAdapter.capabilities]
+  /// before open throws by contract), **or** the open backend does not implement
+  /// the capabilities struct at all — `ONVIFCameraAdapter.capabilities` is still
+  /// `_planned()` and throws [UnimplementedError]. So capabilities is genuinely
+  /// *optional* data, and every caller must treat it as nullable.
+  ///
+  /// Only [UnimplementedError] is swallowed. A [StateError] here would mean we
+  /// read capabilities while not open despite the [CameraAdapter.isOpen] guard —
+  /// a real bug that must keep propagating rather than being masked as "no
+  /// capabilities".
   ///
   /// Still the source of numeric detail — zoom min/max. For "is this feature
-  /// available at all?", prefer [featureMatrix].
-  CameraCapabilities? get capabilities =>
-      _adapter.isOpen ? _adapter.capabilities : null;
+  /// available at all?", use [featureMatrix]/[supports], which every backend
+  /// implements.
+  CameraCapabilities? get capabilities {
+    if (!_adapter.isOpen) return null;
+    try {
+      return _adapter.capabilities;
+    } on UnimplementedError {
+      return null;
+    }
+  }
 
   /// Feature support of the *open* device, or null when nothing is open.
   ///
@@ -167,7 +188,7 @@ class CameraSession extends ChangeNotifier {
       _adapterType = type;
       _devices = const <CameraDevice>[];
       _selectedId = null;
-      _zoom = 1;
+      _zoom = _defaultZoom;
       _busy = false;
     });
     await refreshDevices();
@@ -275,7 +296,7 @@ class CameraSession extends ChangeNotifier {
         _adapterType = profile.backendType;
         _devices = const <CameraDevice>[];
         _selectedId = null;
-        _zoom = 1;
+        _zoom = _defaultZoom;
       });
     }
 
@@ -468,11 +489,14 @@ class CameraSession extends ChangeNotifier {
         await _serialized(_adapter.close);
         return;
       }
-      final caps = _adapter.capabilities;
+      // Read through the null-safe getter: a backend without a capabilities
+      // struct (ONVIF today) must still complete a successful open rather than
+      // having its UnimplementedError caught below and reported as a failure.
+      final caps = capabilities;
       _update(() {
         _selectedId = device.id;
         _busy = false;
-        _zoom = caps.minZoomLevel;
+        _zoom = caps?.minZoomLevel ?? _defaultZoom;
       });
     } on Object catch (e) {
       _update(() {
@@ -497,7 +521,9 @@ class CameraSession extends ChangeNotifier {
   }
 
   /// Sets zoom (optimistically updates the slider, then applies). Only call
-  /// when `capabilities!.hasZoom` — the UI gates this.
+  /// when `supports(CameraFeature.zoom)` — the UI gates this. Note the *range*
+  /// still comes from [capabilities], which may be null; gate on the matrix,
+  /// clamp with capabilities.
   Future<void> setZoom(double value) async {
     _update(() => _zoom = value);
     try {
@@ -507,8 +533,8 @@ class CameraSession extends ChangeNotifier {
     }
   }
 
-  /// Pans the camera. Only call when `capabilities!.hasPan` — otherwise the
-  /// contract throws [UnsupportedError] (surfaced as [error]).
+  /// Pans the camera. Only call when `supports(CameraFeature.pan)` — otherwise
+  /// the contract throws [UnsupportedError] (surfaced as [error]).
   Future<void> setPan(double angle) async {
     try {
       await _serialized(() => _adapter.setPan(angle));
@@ -517,7 +543,7 @@ class CameraSession extends ChangeNotifier {
     }
   }
 
-  /// Tilts the camera. Only call when `capabilities!.hasTilt`.
+  /// Tilts the camera. Only call when `supports(CameraFeature.tilt)`.
   Future<void> setTilt(double angle) async {
     try {
       await _serialized(() => _adapter.setTilt(angle));

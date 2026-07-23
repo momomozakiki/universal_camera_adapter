@@ -20,6 +20,11 @@ import '../widgets/no_camera.dart';
 /// here — matrix for "may I?", capabilities for "between what?" — and that is
 /// deliberate, not a half-finished migration to "complete" by inventing a range
 /// on the matrix.
+///
+/// `session.capabilities` is **nullable**, and not only when nothing is open: a
+/// backend may implement the matrix while its capabilities struct is still
+/// unimplemented (ONVIF today). The matrix is therefore the mandatory surface
+/// and capabilities the optional one — never dereference it with `!`.
 class PtzTab extends StatefulWidget {
   const PtzTab({super.key, required this.session});
 
@@ -47,17 +52,24 @@ class _PtzTabState extends State<PtzTab> {
           );
         }
         // Range only — the enable/disable decision below comes from the matrix.
-        final caps = session.capabilities!;
+        // Nullable: a backend may implement the matrix without the legacy
+        // capabilities struct, in which case there is no range to offer and the
+        // zoom slider is simply disabled.
+        final caps = session.capabilities;
+        final minZoom = caps?.minZoomLevel ?? 1.0;
+        final maxZoom = caps?.maxZoomLevel ?? 1.0;
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
             _CapabilitySlider(
               label: 'Zoom',
-              enabled: session.supports(CameraFeature.zoom),
-              value: session.zoom.clamp(caps.minZoomLevel, caps.maxZoomLevel),
-              min: caps.minZoomLevel,
-              max: caps.maxZoomLevel,
-              unsupportedNote: 'This camera reports no zoom range.',
+              enabled: caps != null && session.supports(CameraFeature.zoom),
+              value: session.zoom.clamp(minZoom, maxZoom),
+              min: minZoom,
+              max: maxZoom,
+              unsupportedNote: caps == null
+                  ? 'This camera does not report a zoom range.'
+                  : 'This camera reports no zoom range.',
               onChanged: session.setZoom,
             ),
             _CapabilitySlider(
