@@ -110,6 +110,22 @@ class EzvizCameraAdapter extends CameraAdapter {
   }
 
   @override
+  CameraFeatureMatrix get featureMatrix {
+    // Reuse the base derivation (zoom/pan/tilt from [capabilities], which also
+    // enforces the open-state check), then downgrade the features that aren't
+    // wired yet: the vendored plugin's native capturePicture is a stub (see
+    // [captureFrame]), so frame capture — and the scanning features built on
+    // it — are unvalidated, not supported, until that native patch lands.
+    return super.featureMatrix.withStatuses(
+      const <CameraFeature, CameraFeatureStatus>{
+        CameraFeature.frameCapture: CameraFeatureStatus.unvalidated,
+        CameraFeature.qrScanning: CameraFeatureStatus.unvalidated,
+        CameraFeature.barcodeScanning: CameraFeatureStatus.unvalidated,
+      },
+    );
+  }
+
+  @override
   Widget buildPreview() {
     final device = _device;
     final accessToken = _accessToken;

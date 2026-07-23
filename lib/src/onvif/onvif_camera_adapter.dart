@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:xml/xml.dart';
 
 import '../camera_adapter.dart';
+import '../camera_feature.dart';
 import '../camera_types.dart';
 import 'onvif_http_client.dart';
 import 'onvif_media_service.dart';
@@ -213,6 +214,31 @@ class ONVIFCameraAdapter extends CameraAdapter {
 
   @override
   CameraCapabilities get capabilities => _planned();
+
+  @override
+  CameraFeatureMatrix get featureMatrix {
+    if (!_isOpen) {
+      throw StateError('ONVIFCameraAdapter is not open. Call open(device) first.');
+    }
+    // Built explicitly rather than via the base derivation: [capabilities]
+    // still throws UnimplementedError here (ROADMAP v1.1), so the base getter
+    // can't read it. Zoom/PTZ are not yet wired (AbsoluteMove pending), and
+    // frame capture / scanning are unvalidated until GetSnapshotUri lands —
+    // reported unvalidated, not supported, so scanning features stay gated.
+    return CameraFeatureMatrix.fromStatuses(
+      const <CameraFeature, CameraFeatureStatus>{
+        CameraFeature.zoom: CameraFeatureStatus.unsupported,
+        CameraFeature.pan: CameraFeatureStatus.unsupported,
+        CameraFeature.tilt: CameraFeatureStatus.unsupported,
+        CameraFeature.frameCapture: CameraFeatureStatus.unvalidated,
+        CameraFeature.qrScanning: CameraFeatureStatus.unvalidated,
+        CameraFeature.barcodeScanning: CameraFeatureStatus.unvalidated,
+        CameraFeature.textRecognitionOcr: CameraFeatureStatus.unvalidated,
+        CameraFeature.twoWayAudio: CameraFeatureStatus.unvalidated,
+        CameraFeature.motionEvents: CameraFeatureStatus.unvalidated,
+      },
+    );
+  }
 
   @override
   Widget buildPreview() {

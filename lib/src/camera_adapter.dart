@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 
+import 'camera_feature.dart';
 import 'camera_types.dart';
 
 /// The default timeout applied to network-bound camera operations.
@@ -56,6 +57,48 @@ abstract class CameraAdapter {
 
   /// What the *opened* device can do. Throws [StateError] if not open.
   CameraCapabilities get capabilities;
+
+  /// The tri-state support of every [CameraFeature] for the opened device.
+  ///
+  /// This is the feature surface consumers should prefer: a feature queries its
+  /// [CameraFeature] here and degrades to "not supported" when the answer isn't
+  /// [CameraFeatureStatus.supported], so adding a feature never forces an edit
+  /// to this contract or to every backend (Open/Closed).
+  ///
+  /// The default derivation maps [capabilities] onto zoom/pan/tilt and assumes
+  /// the generic primitives are available — and is deliberately **optimistic**:
+  /// [CameraFeature.frameCapture] and the scanning features default to
+  /// [CameraFeatureStatus.supported] because [captureFrame] is a required
+  /// contract method. **A backend whose [captureFrame] is not actually wired
+  /// (i.e. it throws) MUST override this getter** to downgrade `frameCapture`
+  /// and the scanning features to [CameraFeatureStatus.unvalidated] /
+  /// [CameraFeatureStatus.unsupported] — otherwise it inherits a false positive.
+  /// A backend may reuse this base result and adjust a few entries via
+  /// [CameraFeatureMatrix.override] (see `EzvizCameraAdapter`), or build its own
+  /// matrix when it can't read [capabilities] (see `ONVIFCameraAdapter`).
+  ///
+  /// Like [capabilities], this is a post-open query — the default derivation
+  /// reads [capabilities] and therefore throws [StateError] if not open.
+  CameraFeatureMatrix get featureMatrix {
+    final caps = capabilities; // throws StateError if not open — intentional.
+    return CameraFeatureMatrix.fromStatuses(<CameraFeature, CameraFeatureStatus>{
+      CameraFeature.zoom: caps.hasZoom
+          ? CameraFeatureStatus.supported
+          : CameraFeatureStatus.unsupported,
+      CameraFeature.pan: caps.hasPan
+          ? CameraFeatureStatus.supported
+          : CameraFeatureStatus.unsupported,
+      CameraFeature.tilt: caps.hasTilt
+          ? CameraFeatureStatus.supported
+          : CameraFeatureStatus.unsupported,
+      CameraFeature.frameCapture: CameraFeatureStatus.supported,
+      CameraFeature.qrScanning: CameraFeatureStatus.supported,
+      CameraFeature.barcodeScanning: CameraFeatureStatus.supported,
+      CameraFeature.textRecognitionOcr: CameraFeatureStatus.unvalidated,
+      CameraFeature.twoWayAudio: CameraFeatureStatus.unvalidated,
+      CameraFeature.motionEvents: CameraFeatureStatus.unvalidated,
+    });
+  }
 
   // --- Video ---
 

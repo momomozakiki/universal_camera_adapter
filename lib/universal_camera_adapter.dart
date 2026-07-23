@@ -14,6 +14,13 @@ export 'src/camera_adapter_registry.dart'
     show CameraAdapterRegistry, CameraAdapterFactory;
 export 'src/camera_types.dart'
     show CameraDevice, CameraCapabilities, CameraLensFacing;
+export 'src/camera_feature.dart'
+    show
+        CameraFeature,
+        CameraFeatureStatus,
+        CameraFeatureSupport,
+        CameraFeatureMatrix,
+        kFeatureBundles;
 
 // Shipped backend.
 export 'src/flutter_camera_adapter.dart' show FlutterCameraAdapter;
