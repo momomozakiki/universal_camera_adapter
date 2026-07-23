@@ -89,6 +89,15 @@ in parallel with Epic 2's completion).
 > `CameraSetupWizard` item below and any future profile/persistence work should extend that
 > mechanism rather than re-inventing adapter switching.
 
+- [ ] **Guardrail docs/skills (prerequisite — doc-only, no Dart code).** Codify the two enforcement
+      rules *before* the implementation bullets below (and before further ONVIF/EZVIZ feature work):
+      (1) per-camera-type setup/connection state flows through one generic mechanism, never a
+      per-type `SharedPreferences` namespace; (2) camera features query capability and degrade to
+      "not supported" — never adapter-embedded feature logic, never feature-code camera-type
+      branching. Landed as additions to `camera-adapter-authoring` (§6 features-queried, §7
+      setup-state-generic), `state-management` (Rule 6), `dart-solid-principles` (ISP both-ways), and
+      the `code-reviewer` agent (hard must-fix row 6). Checkable today against the current
+      boolean-`CameraCapabilities`/`CameraSession` code; the implementation bullets below inherit it.
 - [ ] **`CameraFeature` enum** (zoom, pan, tilt, frameCapture, qrScanning, barcodeScanning,
       textRecognitionOcr, twoWayAudio, motionEvents as `unvalidated` placeholders for future epics).
 - [ ] **`CameraFeatureStatus`** tri-state (unsupported, unvalidated, supported) and
@@ -101,7 +110,12 @@ in parallel with Epic 2's completion).
       ONVIF WS-Discovery updated to implement `NetworkDiscoverable`.
 - [ ] **`CameraProfile`** + **`CameraProfileStore`** (injectable, default: shared_preferences) +
       **`CameraSecretStore`** (injectable, default: flutter_secure_storage) (`lib/src/persistence/`).
-      Default-camera selection rules, fallback to live discovery.
+      Default-camera selection rules, fallback to live discovery. **When this lands, reconsider
+      `ONVIFCameraAdapter.credentials` being a `final` constructor-only field** — it is the structural
+      root that *forces* the out-of-band `example/lib/onvif/onvif_connect_view.dart` persistence (the
+      documented exception in `camera-adapter-authoring` §7 / `state-management` Rule 6). Setup fields
+      should become settable/updatable through the same `open(device)`/profile path every adapter
+      uses, letting that exception be **removed** rather than perpetuated.
 - [ ] **`CameraSetupWizard`** abstract + **`CameraSetupWizardRegistry`** (`lib/src/setup/`), parallel
       registry for modular setup UI.
 - [ ] Example app **`CamerasTab`** (discovery results + saved profiles + "Add camera" wizard chooser).
@@ -110,8 +124,12 @@ in parallel with Epic 2's completion).
       [`feature-matrix.md`](../camera/feature-matrix.md),
       [`camera-profiles.md`](../camera/camera-profiles.md),
       [`add-camera-wizard.md`](../camera/add-camera-wizard.md).
-- [ ] **TODO:** update `camera-adapter-authoring` skill with `CameraFeature` guidance once `CameraFeatureMatrix`
-      lands (currently only documents `CameraCapabilities` boolean flags).
+- [ ] **TODO (second, narrower pass):** once `CameraFeatureMatrix`/`CameraProfile` land in code, add
+      concrete API-usage examples to the skills (how to declare a `CameraFeature`, how to write
+      through `CameraProfileStore`) on top of the guardrail rule already in place from the prerequisite
+      step above. This is additive polish — the decoupling *rule* is already codified and enforced;
+      this pass just swaps the "once landed" placeholders for real `featureMatrix`/`CameraProfile`
+      snippets.
 
 ## Epic 2.6 — v1.3: EzvizCameraAdapter (per-user, native login)  *(in progress — current priority)*
 

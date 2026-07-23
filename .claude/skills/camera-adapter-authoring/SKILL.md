@@ -63,6 +63,67 @@ New backends register under a new string type via `CameraAdapterRegistry.registe
 `asDefault: true` only when the app should genuinely prefer this backend by default — registering
 is never implicitly "first one wins".
 
+### 6. Features are queried, never embedded
+
+A camera *feature* (zoom, pan/tilt, QR, barcode, OCR, two-way audio — anything camera-facing, now or
+future) is consumer/app-level code that asks an adapter "can you do X?" and degrades to "not
+supported" when the answer is no. It is **never** adapter-embedded feature logic, and **never**
+camera-type-branched. This is the [[dart-solid-principles]] Open/Closed + Interface-Segregation rules
+made concrete for features: a new feature must not force an edit to the contract or to every backend.
+
+The reference-correct example already in the tree: QR/barcode scanning
+(`example/lib/scanning/frame_scanner.dart`) is built entirely on the generic `captureFrame()`
+contract method. It never touches adapter internals and never branches per backend — any adapter that
+can capture a frame gets scanning for free.
+
+Two failure directions, **both forbidden**:
+
+- **Adapter-embedded feature logic** — a concrete adapter file (`flutter_camera_adapter.dart`,
+  anything under `lib/src/onvif/`, an EZVIZ adapter) grows a method or field that exists only to
+  serve one named feature (e.g. a `decodeBarcode()` method, a `qrOverlayColor` field) instead of a
+  generic capability primitive (`captureFrame()`) the feature builds on.
+- **Feature-code camera-type branching** — feature code does `if (adapter is ONVIFCameraAdapter)`, a
+  `switch` on the registry type string, or a backend-name compare to special-case behavior per
+  backend, instead of querying `capabilities` (today) / `featureMatrix` (once Epic 2.5 lands).
+
+**Diff checklist:**
+
+- Does this diff add or change a feature (QR, PTZ, OCR, anything camera-facing)? If yes: does it touch
+  any file under `lib/src/*_adapter.dart`, `lib/src/onvif/`, or a concrete adapter in `example/`? If
+  yes, **stop** — that's the wrong layer. Feature logic belongs in consumer/example code built on the
+  generic primitives (`captureFrame`, `capabilities`/`featureMatrix`). If the primitive it needs is
+  missing, that's a *contract* change to discuss first — not a feature-specific method bolted onto one
+  backend.
+- Does this diff add a camera-type check (`is SomeCameraAdapter`, a `switch` on registry type, a
+  backend-name string compare) inside feature code (anything outside `lib/src/*_adapter.dart` and
+  `lib/src/onvif/`)? If yes, **stop** — replace it with a capability / feature-matrix query.
+
+### 7. Setup/connection state flows through a generic mechanism, never a one-off store
+
+Camera *selection/setup* is legitimately camera-type-specific: a built-in camera is auto-detected and
+needs no setup; ONVIF needs host/port/username/password; EZVIZ needs an account + verification code.
+That per-type UI and per-type field set is expected — it does **not** have to be identical across
+adapters. What must be generic is *where the resulting state lives and how it is persisted*: one
+mechanism every setup flow writes through (`CameraSession` today; `CameraProfile`/`CameraProfileStore`
+once Epic 2.5 lands), **not** a fresh `SharedPreferences` key namespace invented per camera type.
+
+`example/lib/onvif/onvif_connect_view.dart` is today's counter-example, and is explicitly documented
+in that file as a deliberate, temporary exception — `ONVIFCameraAdapter.credentials` is a `final`
+constructor-only field, so its setup state can't yet flow through `CameraSession`. It is **not** a
+pattern to copy for the next camera type. See [[state-management]] Rule 6 for the persistence side.
+
+**Diff checklist:**
+
+- Does this diff add a new persisted setup/credential field for a camera type (host, port, token,
+  verification code, serial number)? If yes: does it write through `CameraSession` / the generic
+  profile mechanism, or does it call `SharedPreferences`/secure storage directly with a bespoke key?
+  If the latter, **stop** and flag it — cite [[state-management]] Rule 6.
+- Does this diff make a concrete adapter's credentials/config `final`-constructor-only in a way that
+  *forces* a caller around `CameraSession`/the registry to persist and re-supply them out-of-band (as
+  `ONVIFCameraAdapter` does today)? If yes, that's a structural smell worth a ROADMAP note even if not
+  fixed in this diff — an adapter's setup fields should be settable/updatable through the same
+  `open(device)` path every other adapter uses.
+
 ## Package placement (single-package layout)
 
 Backends live under `lib/src/` — the shipped one directly (`lib/src/flutter_camera_adapter.dart`),

@@ -19,6 +19,14 @@ progressive-disclosure folding) are adopted from the
 - [`onvif-setup-guide.md`](camera/onvif-setup-guide.md) — setup + network-permission requirements
   for the (planned) ONVIF/IP-camera backend: Android `INTERNET`/`CHANGE_WIFI_MULTICAST_STATE`,
   Windows UDP 3702 firewall, RTSP/TCP transport.
+- [`feature-matrix.md`](camera/feature-matrix.md) — the (planned, Epic 2.5) `CameraFeature` /
+  tri-state `CameraFeatureStatus` / `CameraFeatureMatrix` design: how a feature is *queried* from an
+  adapter and degrades to "not supported", instead of being embedded per backend. The design spec
+  behind `camera-adapter-authoring` §6.
+- [`camera-profiles.md`](camera/camera-profiles.md) — the (planned, Epic 2.5) `CameraProfile` /
+  `CameraProfileStore` / `CameraSecretStore` design: one generic mechanism for persisting
+  per-camera-type setup state. The design spec behind `camera-adapter-authoring` §7 /
+  `state-management` Rule 6.
 
 ## plan/ — active planning & tracking
 - [`ROADMAP.md`](plan/ROADMAP.md) — the canonical, checkable "where are we" tracker. The

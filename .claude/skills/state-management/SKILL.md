@@ -77,6 +77,20 @@ round-trip isn't done.
 **Smell:** a PR that adds a `save()` call but no restart/round-trip check anywhere — manual note or
 test.
 
+## Rule 6 — Setup/connection state is camera-type-specific; the storage mechanism is not
+
+Per-camera-type setup fields (ONVIF host/port/credentials, EZVIZ account/verification code) are
+expected to differ in shape — that's fine. What's **not** allowed to differ is *where* that state is
+stored: route it through `CameraSession` (today) or the generic profile mechanism
+(`CameraProfile`/`CameraProfileStore`, once Epic 2.5 lands) — never a fresh, camera-type-named
+`SharedPreferences` key namespace invented per screen. One storage mechanism, many field shapes.
+
+**Smell:** a new setup/connect view that calls `SharedPreferences.getInstance()` directly with its
+own key prefix. `example/lib/onvif/onvif_connect_view.dart`'s `onvif_tab.*` keys are today's
+documented, deliberate exception (blocked on `ONVIFCameraAdapter.credentials` being a `final`
+constructor-only field) — **not** a template to copy. See [[camera-adapter-authoring]] section 7 for
+the adapter-contract side of why this happens and what the fix path is.
+
 ## PR litmus test
 
 - ✅ Is every new piece of user-visible state explicitly in-memory or persisted — never accidental?
@@ -85,6 +99,8 @@ test.
 - ✅ Does a restored reference (e.g. a device ID) get re-checked against live data before use?
 - ✅ Has restoration actually been verified with a restart or an equivalent round-trip test?
 - ✅ Does the PR/ledger entry say which state is in-memory vs. persisted, and why?
+- ✅ Does new per-camera-type setup state flow through `CameraSession`/the generic profile mechanism,
+  not a fresh camera-type-named `SharedPreferences` namespace? (Rule 6)
 
 ## References
 

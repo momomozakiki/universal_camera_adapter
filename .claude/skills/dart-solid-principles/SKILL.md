@@ -89,8 +89,19 @@ Future<void> setPan(double angle, {Duration timeout = const Duration(seconds: 15
     throw UnsupportedError('This backend does not support pan');
 ```
 
+This cuts **both ways**. It is not only that an adapter must not be forced to implement a feature it
+lacks (the PTZ default-throw case above) — *feature code must equally not depend on a concrete
+adapter's type*, only on the shared capability-query surface. A feature module that imports
+`ONVIFCameraAdapter` (or any concrete backend) to special-case it, instead of asking
+`capabilities`/`featureMatrix`, has the same coupling problem in the opposite direction: it breaks the
+moment a second backend needs that feature. The reference-correct example is QR/barcode scanning
+(`example/lib/scanning/frame_scanner.dart`), built purely on the generic `captureFrame()` primitive —
+it works against every backend without naming any of them. The concrete backend-author checklist for
+this is [[camera-adapter-authoring]] section 6.
+
 **Smell:** forcing every backend to implement a full PTZ surface with `=> throw Unimplemented`
-stubs, or a consumer calling `setPan` without checking `capabilities.hasPan` first.
+stubs; a consumer calling `setPan` without checking `capabilities.hasPan` first; or feature code that
+does `if (adapter is SomeConcreteAdapter)` / a registry-type `switch` instead of querying capability.
 
 ## D — Dependency Inversion
 

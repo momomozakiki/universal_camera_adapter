@@ -28,7 +28,12 @@ fix, then re-runs you.
 Before reviewing, read `.claude/skills/dart-solid-principles/SKILL.md`. Its SOLID mappings and
 everyday-practices rules (DRY/reuse-before-build, helper extraction, file/class size, immutability,
 naming/visibility, test mirroring) are the checklist; this agent only *applies* them to a concrete
-diff. For the camera contract specifics, also consult `camera-adapter-authoring`. If a skill and the
+diff. For the camera contract specifics, also consult `camera-adapter-authoring` (its sections 6 & 7
+own the feature-decoupling and setup-persistence rules). Additionally, **load
+`.claude/skills/state-management/SKILL.md` when the diff modifies** `CameraSession` /
+`example/lib/camera_session.dart`, `CameraProfile` / `CameraProfileStore` (once landed), any
+`SharedPreferences` use, or **any file whose path contains `connect`, `setup`, or `credential`** — it
+owns Rule 6 (per-camera-type setup state must flow through one generic mechanism). If a skill and the
 code disagree, the skill wins — flag the divergence.
 
 ## Inputs to inspect
@@ -48,6 +53,22 @@ code disagree, the skill wins — flag the divergence.
 | 3 | Size & extraction | Functions past ~30 lines with a nameable sub-step get a private helper; files past ~200 lines (~300 for a genuinely complex backend) are flagged; the "and" test for class responsibilities. |
 | 4 | Contract & idiom | Backend changes honor the `CameraAdapter` contract (capabilities queried post-open; typed errors `StateError`/`UnsupportedError`/`TimeoutException`/`FormatException`, never a raw plugin/SDK exception); consumers depend on the interface + registry, never a concrete backend (the Golden Rule); immutable value types with `const`/`copyWith`; naming carries intent; no `print`. |
 | 5 | Tests | New/changed public behavior has a mirrored test covering happy + not-supported + error paths; tests are deterministic (via `MockCameraAdapter`, no live hardware); behavior changes are pinned, not just exercised. |
+| 6 | Setup/feature coupling | New feature code doesn't reference a concrete adapter type; a new setup/credential field flows through the generic `CameraSession`/profile mechanism, not a one-off `SharedPreferences` key. See `camera-adapter-authoring` §6–§7 and `state-management` Rule 6. |
+
+**Row 6 is a hard must-fix, not a soft observation.** Return `CHANGES REQUESTED` when the diff shows
+either red flag:
+
+- a **new `SharedPreferences` (or other direct persistence) instance/key created for camera
+  setup/credential state**, outside the generic `CameraSession`/profile mechanism; or
+- an **`if (adapter is <Concrete>CameraAdapter)` / registry-type `switch` / backend-name compare
+  inside feature code** (anything outside `lib/src/*_adapter.dart` and `lib/src/onvif/`).
+
+**Documented exception:** `example/lib/onvif/onvif_connect_view.dart`'s existing `onvif_tab.*`
+raw-`SharedPreferences` persistence is a **known, temporary, documented exception** — it exists only
+because `ONVIFCameraAdapter.credentials` is a `final` constructor-only field, and it has a standing
+ROADMAP fix item (Epic 2.5). Do **not** re-flag this existing code as a new must-fix on an unrelated
+diff, and do **not** let a diff copy it as an approved pattern elsewhere — any *new* occurrence of the
+pattern is still a must-fix.
 
 Do **not** review input-hardening (untrusted SOAP/XML/RTSP input, regex bounds, network response
 caps, secrets) — that's the `security-reviewer` gate; if you spot such an issue anyway, note it as a
