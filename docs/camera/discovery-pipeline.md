@@ -12,10 +12,21 @@ applies_when: "Implementing or extending multi-backend discovery (local → exte
 
 **Version 1.0** — *three-stage observation: OS → local hardware → external/network.*
 
+> **Status: design spec, not implemented.** Unlike its three sibling Epic 2.5 specs, nothing here has
+> been built. `CameraDiscoveryPipeline` and `NetworkDiscoverable` do not exist, and
+> `ONVIFCameraAdapter.listDevices()` still throws `UnimplementedError` — WS-Discovery was
+> deliberately deferred out of the Epic 2.5 slice, with manual "add by IP" covering ONVIF instead
+> (see `docs/plan/ROADMAP.md`). This file therefore stays `official: false`: it describes an intended
+> design, not shipped behaviour. Two consequences are already load-bearing elsewhere: profile
+> re-validation is **two-mode** (a backend that cannot enumerate is validated by `open()` instead,
+> detected by catching `UnimplementedError` rather than by naming the backend), and the Cameras tab
+> shows saved profiles only — there is no live-discovery list to merge with them yet.
+
 ## Revision History
 | Version | Date       | Change   |
 |---------|------------|----------|
 | 1.0     | 2026-07-22 | Initial. |
+| 1.0a    | 2026-07-23 | No design change. Added the status banner above recording that this spec remains unimplemented after Epic 2.5, and the two places the deferral is already visible in shipped code. |
 
 ## Problem
 

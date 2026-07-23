@@ -3,16 +3,25 @@
 The canonical, checkable "where are we" tracker. Follow it top-down; update the status boxes and
 commit note as each item is verified and committed. This supersedes ad-hoc status notes.
 
-**Next action:** Epic 2.5 **Phase C** — the `ONVIFCameraAdapter.credentials` final-field fix. Epic 2.5
-is being delivered as a lettered phase sequence (see the plan archived under `plans/`); **Phase A
-(feature matrix) and Phase B (profile/secret persistence) have landed** in `8a390ee` and `21fc728`
-respectively, on top of the guardrail codification in `5303f85`. Phase C adds
-`OnvifCredentials.fromMetadata()` so credentials flow through `open(device)` like every other
-adapter, and registers `'onvif'` as a first-class camera type in the example registry. Remaining
-after that: **Phase D** (`CameraSetupWizard` + registry, per-type wizards), **Phase E** (`CamerasTab`,
-session restore, removal of the `onvif_tab.*`/`ezviz_tab.*` raw-prefs hacks), **Phase F** (tests,
-doc frontmatter flips, review gates, push). WS-Discovery / `CameraDiscoveryPipeline` is
-**deliberately deferred** out of this slice — manual "add by IP" covers ONVIF for now.
+**Next action:** **Manually verify the Epic 2.5 slice against real hardware, then Epic 2.6.**
+Epic 2.5 is code-complete apart from the deliberately deferred WS-Discovery pipeline: the feature
+matrix (`8a390ee`), profile/secret persistence (`21fc728`), ONVIF credentials through
+`open(device)` (`4ea58ab`), the setup-wizard registry and three wizards (`13a0697`), the
+Cameras-first UX with profile restore and removal of the raw-prefs hacks (`9533e47`), the
+nullable-`capabilities` fix (`08d9ec8`), and editing/renaming a saved camera (`2abce25`).
+
+What is *not* done is a human pass. Everything above is covered by tests and a green Windows build,
+but the following have never been driven by hand and must be before this slice is called finished:
+the **ONVIF preview after the capabilities fix** (the acceptance test for `08d9ec8`), the **edit
+flow** (pre-fill, re-test-before-save, Default-badge survival, idle-vs-active re-open), **rename**,
+and **kill-and-relaunch restore**. Use the EZVIZ CS-H6c at `192.168.0.217` over ONVIF.
+
+**Every EZVIZ path is unverifiable on this machine** — the SDK raises `MissingPluginException` on
+Windows and no Android device has been attached — so EZVIZ has analyzer and compile coverage only.
+Attach a phone before trusting any of it.
+
+Then **Epic 2.6**: patch the vendored `capturePicture` so `captureFrame()` returns real bytes, which
+is what unblocks `frameCapture` → `supported` and the scanning features for EZVIZ.
 
 Epic 2.6 (EZVIZ) is paused mid-flight, not abandoned: `EzvizSetupWizard`
 (`example/lib/ezviz/ezviz_setup_wizard.dart`) already drives sign-in → device list → verification
@@ -85,8 +94,18 @@ separate, later plan.
       `rtsp://…/Streaming/Channels/101`, and a `media_kit` H/W-rendered 3840×2160 preview
       (`Direct3D Feature Level: 11_0`).)**
 - [ ] PTZ AbsoluteMove (pan/tilt/zoom); snapshot via GetSnapshotUri.
-- [ ] WS-Discovery (optional auto-discovery) + manual IP input.
+- [ ] WS-Discovery (optional auto-discovery). **Manual IP input is done** — `OnvifSetupWizard`
+      (Epic 2.5 Phase D) collects host/port/credentials and verifies them with a real round-trip
+      before saving.
 - [ ] Input-hardening pass on all SOAP/XML/RTSP parsing.
+- [ ] **`ONVIFCameraAdapter.capabilities` is still `_planned()`** and throws `UnimplementedError`;
+      only `featureMatrix` is implemented (built explicitly, since the base derivation reads
+      `capabilities`). **Consumer consequence, learned the hard way on 2026-07-23:** treat
+      `CameraSession.capabilities` as **nullable** — it returns null for a backend without the struct,
+      not just when nothing is open. Three UI call sites assumed otherwise and red-screened the
+      Preview tab against a live ONVIF camera (`08d9ec8`). Gate features on `featureMatrix`/
+      `supports()`, which every backend implements; use `capabilities` only for numeric ranges, with
+      a fallback. Wiring real capabilities here belongs with the PTZ/zoom bullet above.
 
 ## Epic 2.5 — v1.2: Discovery pipeline + feature matrix + camera profiles + modular add-camera
 
@@ -142,6 +161,13 @@ in parallel with Epic 2's completion).
 - [ ] **`CameraDiscoveryPipeline`** + **`NetworkDiscoverable` mixin** (`lib/src/discovery/`); three-stage
       observable discovery (OS filtering → local enumeration → external probes/cloud list).
       ONVIF WS-Discovery updated to implement `NetworkDiscoverable`.
+      **Deliberately deferred out of the Epic 2.5 slice** (decision recorded 2026-07-23) — manual
+      "add by IP" through `OnvifSetupWizard` covers ONVIF for now, and every other Epic 2.5 item
+      shipped without it. Two consequences are live in the code today and should be revisited when
+      this lands: `ONVIFCameraAdapter.listDevices()` throws `UnimplementedError`, which is what puts
+      profile re-validation into its two-mode shape; and `CamerasTab` shows saved profiles only,
+      with no live-discovery list to merge. [`discovery-pipeline.md`](../camera/discovery-pipeline.md)
+      stays `official: false` until this is built.
 - [x] **`CameraProfile`** + **`CameraProfileStore`** (injectable, default: shared_preferences) +
       **`CameraSecretStore`** (injectable, default: flutter_secure_storage) (`lib/src/persistence/`).
       **(done 2026-07-23 — Phase B, `21fc728`.)** Profiles persist under one versioned envelope
@@ -159,14 +185,45 @@ in parallel with Epic 2's completion).
       `camera-adapter-authoring` §7 / `state-management` Rule 6). Once credentials flow through
       `open(device)` via `OnvifCredentials.fromMetadata()`, that exception is **removed** in Phase E
       rather than perpetuated.
-- [ ] **`CameraSetupWizard`** abstract + **`CameraSetupWizardRegistry`** (`lib/src/setup/`), parallel
-      registry for modular setup UI.
-- [ ] Example app **`CamerasTab`** (discovery results + saved profiles + "Add camera" wizard chooser).
-- [ ] Example app **`CameraSession.switchTo()`** for seamless camera switching.
-- [ ] New documentation: [`discovery-pipeline.md`](../camera/discovery-pipeline.md),
-      [`feature-matrix.md`](../camera/feature-matrix.md),
-      [`camera-profiles.md`](../camera/camera-profiles.md),
-      [`add-camera-wizard.md`](../camera/add-camera-wizard.md).
+- [x] **`CameraSetupWizard`** abstract + **`CameraSetupWizardRegistry`** (`lib/src/setup/`), parallel
+      registry for modular setup UI. **(done 2026-07-23 — Phase D, `13a0697`.)** Instance-based and
+      deliberately **without** `asDefault`/`createDefault`: a default *backend* is meaningful, a
+      default *setup flow* is not. Three concrete wizards live in `example/lib/setup/` (builtin,
+      ONVIF, EZVIZ) because they touch vendor SDKs and a concrete secret store.
+      **Editing a saved camera** was added on top (`2abce25`): an opt-in `supportsEditing` /
+      `buildEditor` pair defaulting to "not supported" the way `CameraAdapter.setPan`/`setTilt` do,
+      plus a third documented invariant — `buildEditor` must preserve the profile's `id`,
+      `createdAt` and `isDefault` via `copyWith`. A fresh `id` would strand the password stored under
+      the old one (secrets are keyed by profile id) and silently drop the default-camera choice.
+      `OnvifSetupWizard` implements it; **renaming** is handled generically by the Cameras tab, since
+      `displayName` is a plain field on `CameraProfile`.
+- [x] Example app **`CamerasTab`** (saved profiles + "Add camera" wizard chooser).
+      **(done 2026-07-23 — Phase E, `9533e47`.)** First bottom-nav destination and launch screen, so
+      setup precedes features. Renders one tile per `wizards.registeredTypes` and gates the per-camera
+      **Edit** action on the registered wizard's `supportsEditing` — **zero per-backend conditionals**
+      in the file. *Discovery results are not shown*: the discovery pipeline is deferred (below), so
+      the tab lists saved profiles only.
+- [x] Example app **`CameraSession.switchTo()`** for seamless camera switching.
+      **(done — `switchTo(String type)` in Epic 2.6; `switchToProfile(CameraProfile)` added in Phase E
+      `9533e47`, plus `updateProfile` in `2abce25`.)** Two methods rather than an overload because
+      Dart has none, and keeping `switchTo(String)` intact avoided churning tests that already cover
+      it. Restore is **two-mode**: a backend that can enumerate is re-validated against
+      `listDevices()` before opening; one that cannot (ONVIF, no WS-Discovery) skips discovery and
+      lets `open()` be the validation — detected by catching `UnimplementedError`, not by naming the
+      backend, so an ONVIF backend that later gains discovery is re-validated with no edit here.
+- [x] New documentation: [`feature-matrix.md`](../camera/feature-matrix.md) (v1.3),
+      [`camera-profiles.md`](../camera/camera-profiles.md) (v1.1),
+      [`add-camera-wizard.md`](../camera/add-camera-wizard.md) (v1.1) — all three written, corrected
+      against as-built code, and flipped to `official: true` on 2026-07-23.
+      [`discovery-pipeline.md`](../camera/discovery-pipeline.md) is written but stays
+      **`official: false`** with a status banner: it describes an unimplemented design (see the
+      deferred bullet above), and marking an unbuilt spec official would misrepresent it.
+- [ ] **EZVIZ camera editing** — `EzvizSetupWizard.supportsEditing` is still `false`. What an EZVIZ
+      camera actually has to edit is the verification code and the display name; renaming already
+      works generically, so this is the verification-code path only. **Blocked on hardware, not
+      design:** the EZVIZ SDK raises `MissingPluginException` on Windows and no Android device has
+      been available, so writing a credential-editing path here would ship unverified. Do it with a
+      phone attached.
 - [ ] **TODO (second, narrower pass):** once `CameraFeatureMatrix`/`CameraProfile` land in code, add
       concrete API-usage examples to the skills (how to declare a `CameraFeature`, how to write
       through `CameraProfileStore`) on top of the guardrail rule already in place from the prerequisite

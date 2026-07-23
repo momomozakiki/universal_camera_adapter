@@ -9,21 +9,29 @@ import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 ///
 /// Configure the devices it lists and the capabilities it reports; inject an
 /// exception into any method to exercise a consumer's error handling. It honors
-/// the real contract invariants: one device open at a time, [capabilities] and
-/// [buildPreview] throw [StateError] before [open], and [captureFrame] returns
-/// the configured bytes.
+/// the real contract invariants: one device open at a time, [capabilities],
+/// [featureMatrix] and [buildPreview] throw [StateError] before [open], and
+/// [captureFrame] returns the configured bytes.
 class MockCameraAdapter extends CameraAdapter {
   MockCameraAdapter({
     List<CameraDevice> devices = const <CameraDevice>[],
     CameraCapabilities capabilities = const CameraCapabilities(),
     Uint8List? frameBytes,
+    CameraFeatureMatrix? featureMatrix,
   })  : _devices = devices,
         _capabilities = capabilities,
+        _featureMatrix = featureMatrix,
         _frameBytes = frameBytes ?? Uint8List.fromList(<int>[0xFF, 0xD8, 0xFF, 0xD9]);
 
   final List<CameraDevice> _devices;
   final CameraCapabilities _capabilities;
   final Uint8List _frameBytes;
+
+  /// When null the mock inherits the contract's **base derivation** of
+  /// [featureMatrix] from [capabilities] — the path most backends take. Supply
+  /// one to exercise the override path a backend uses when reality differs from
+  /// that derivation (e.g. an unwired `captureFrame`).
+  final CameraFeatureMatrix? _featureMatrix;
 
   bool _open = false;
   CameraDevice? openedDevice;
@@ -69,6 +77,14 @@ class MockCameraAdapter extends CameraAdapter {
   CameraCapabilities get capabilities {
     _requireOpen();
     return _capabilities;
+  }
+
+  @override
+  CameraFeatureMatrix get featureMatrix {
+    final overridden = _featureMatrix;
+    if (overridden == null) return super.featureMatrix;
+    _requireOpen();
+    return overridden;
   }
 
   @override

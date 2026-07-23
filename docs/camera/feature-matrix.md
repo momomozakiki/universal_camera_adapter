@@ -1,8 +1,8 @@
 ---
 title: Camera Feature Matrix Model
-version: 1.2
+version: 1.3
 last_validated: 2026-07-23
-official: false
+official: true
 source: project-internal
 tags: [features, capabilities, matrix, ptz, zoom, ocr, qr, barcode]
 applies_when: "Building a UI to display/query camera capabilities or implementing feature support in a backend."
@@ -17,6 +17,7 @@ applies_when: "Building a UI to display/query camera capabilities or implementin
 |---------|------------|----------|
 | 1.0     | 2026-07-22 | Initial. |
 | 1.1     | 2026-07-23 | Implemented in Epic 2.5 Phase A (`8a390ee`). Recorded the actual derivation direction (matrix derived *from* `CameraCapabilities`, for backward compatibility) and the future `frameStream` throughput ceiling for scanning. |
+| 1.3     | 2026-07-23 | **Marked `official`** — the model is implemented, exercised by the example app's feature tabs, and covered by `test/camera_feature_matrix_test.dart` (base derivation, override path, and the post-open `StateError` contract, via `MockCameraAdapter`). Recorded the consequence that made the matrix load-bearing rather than advisory: `CameraSession.capabilities` is now **nullable**, because `ONVIFCameraAdapter.capabilities` throws `UnimplementedError` and three UI call sites assumed otherwise (`08d9ec8`). The matrix is the mandatory feature surface; `CameraCapabilities` is optional numeric detail. |
 | 1.2     | 2026-07-23 | Two as-built corrections found by spec review. (1) "Contract change" claimed `featureMatrix` is a **required** getter every backend must implement — it is concrete and optional to override. (2) The EZVIZ entry claimed PTZ is **queried at runtime**; the shipped adapter deliberately reports all-false and refuses to read `isSupportPTZ`. Also added a `withStatuses` override example, a note that `unvalidated` is transitional, and this versioning note. |
 
 > **Spec version vs. code version.** This document is versioned independently of the package. Each

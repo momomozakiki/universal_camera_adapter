@@ -1,8 +1,8 @@
 ---
 title: Camera Profiles and Persistence
-version: 1.0
-last_validated: 2026-07-22
-official: false
+version: 1.1
+last_validated: 2026-07-23
+official: true
 source: project-internal
 tags: [profiles, persistence, storage, secure-storage, preferences]
 applies_when: "Designing the Cameras tab or implementing per-user camera save/recall behavior."
@@ -16,6 +16,11 @@ applies_when: "Designing the Cameras tab or implementing per-user camera save/re
 | Version | Date       | Change   |
 |---------|------------|----------|
 | 1.0     | 2026-07-22 | Initial. |
+| 1.1     | 2026-07-23 | **Implemented and marked `official`** (Epic 2.5 Phase B, `21fc728`; secret transport Phase C, `4ea58ab`). Three as-built corrections: (1) secrets reach an adapter through a **transient `device.metadata` merge**, not the named `open(device, verificationCode:)` parameter this document previously showed — that parameter was never built and was deliberately rejected as an Open/Closed violation; (2) the deleted-default behaviour is decided (Option A, promote most-recent), not an open A/B choice; (3) the secure-storage section now states which platforms are actually exercised instead of asking the reader to check pub.dev. |
+
+> **Spec version vs. code version.** Versioned independently of the package; a revision row names the
+> commits whose behaviour it describes. When code and this document disagree, the code is the source
+> of truth and this file is the bug.
 
 ## What's stored: `CameraProfile`
 
@@ -105,20 +110,36 @@ abstract class CameraSecretStore {
 Located in `lib/src/persistence/camera_secret_store.dart`, with a default
 `FlutterSecureStorageCameraSecretStore` implementation (wraps `flutter_secure_storage`).
 
-**Key design:** adapters never directly read the secure store. An adapter's factory or the
-app-layer setup wizard reads the secret and passes it as a parameter to the adapter's `open()`
-method or constructor, keeping the adapter free of a storage-plugin dependency (single
-responsibility, testability).
+**Key design:** adapters never directly read the secure store. The app-layer setup wizard or session
+reads the secret and hands it to the adapter, keeping the adapter free of a storage-plugin dependency
+(single responsibility, testability).
 
-Example: EZVIZ adapter + verification code:
+**As built — the transient metadata merge.** The v1.0 draft of this section showed the secret being
+passed as a *named parameter* on `open()` (`open(device, verificationCode: …)`). That is **not** what
+shipped, and it was the right call to drop: a per-backend parameter on the shared contract would grow
+an argument per backend, which is exactly the Open/Closed violation the rest of this epic removes.
+Instead the secret is merged into a **throwaway copy** of the device's `metadata` immediately before
+`open`, so the contract signature never changes and every backend stays on one uniform `open(device)`
+path:
+
 ```dart
-// Cameras tab reads the secret
-final verificationCode = await secretStore.getSecret(profile.id, 'verification_code');
-
-// Pass it to the adapter
-final adapter = registry.create('ezviz');
-await adapter.open(profile.device, verificationCode: verificationCode);
+// CameraSession, restoring a saved camera (example/lib/camera_session.dart):
+final merged = <String, dynamic>{...profile.device.metadata};
+for (final key in kCameraSecretKeys) {
+  final secret = await secretStore.getSecret(profile.id, key);
+  if (secret != null && secret.isNotEmpty) merged[key] = secret;
+}
+final adapter = registry.create(profile.backendType);
+await adapter.open(profile.device.copyWith(metadata: merged));
 ```
+
+The merged copy is never stored: session state and the persisted profile both keep the secret-free
+device, so the credential exists only for the duration of the `open` call. Note the loop merges
+**every** known secret key without asking which backend is live — a backend simply ignores a metadata
+key it does not use — which keeps the secret-transport path free of per-type branching.
+
+Secret key names as shipped (`example/lib/adapter_types.dart`): `'password'` for ONVIF,
+`'verificationCode'` for EZVIZ.
 
 ## Default camera selection
 
@@ -133,11 +154,14 @@ system is **additive**, never required for the app to function.
 
 ### When the current default is deleted
 
-- **Option A:** Auto-promote the oldest/most-recently-used remaining profile.
-- **Option B:** Clear default entirely, fall back to live discovery.
+**Decided and shipped: Option A** — `delete()` auto-promotes the **most-recently-created** remaining
+profile (max `createdAt`). Deleting the last profile leaves the store with no default, and the
+session falls back to live discovery as on a fresh install. Chosen over "clear the default entirely"
+because a user with several saved cameras who removes one still expects the app to open *something*
+on next launch rather than dropping back to a device picker.
 
-The implementation should choose one explicitly and document it as user-visible behavior, not leave
-it as a silent implementation detail.
+`save()` also enforces the rule on the way in: saving a profile with `isDefault: true` flips every
+other one off, so the invariant cannot be broken by a caller that bypasses `setDefault`.
 
 ## Relationship to discovery pipeline
 
@@ -175,15 +199,21 @@ interfaces rather than retrofitting later.
 ## Secure storage platform support
 
 `flutter_secure_storage` backing varies by platform (Android Keystore, iOS Keychain, Windows
-DPAPI, Web localStorage). Since EZVIZ is Android/iOS-only anyway (no Windows `ezviz_flutter`
-plugin), the risk is modest, but `camera-profiles.md` should state which platforms the secure
-store is validated on rather than assume universal parity. At minimum:
-- **Android:** Keystore-backed, secure.
-- **iOS:** Keychain-backed, secure.
-- **Windows:** validated but lower-priority for EZVIZ.
+DPAPI, Web localStorage), so this section states what is **actually exercised here** rather than
+assuming parity:
 
-Check the `flutter_secure_storage` pub.dev page for current platform coverage before marking any
-as official.
+- **Windows — exercised.** ONVIF passwords are written and read back through
+  `FlutterSecureStorageCameraSecretStore` on every save/restore, verified 2026-07-23. This is the
+  only platform the secret store has been driven against real user input.
+- **Android — configured, not yet exercised.** `AndroidOptions(encryptedSharedPreferences: true)` is
+  set (`camera_secret_store.dart`), but no Android device has been attached since the store landed,
+  so the EZVIZ verification-code path is compile-checked only.
+- **iOS — untested.** No iOS toolchain in this environment.
+
+**Windows toolchain caveat:** `flutter_secure_storage` needs Visual Studio 2022 with the **C++ ATL**
+component; without it the Windows build fails with `fatal error C1083: Cannot open include file:
+'atlstr.h'`. Switching VS versions additionally requires `flutter clean` (`CMakeCache.txt` pins the
+generator).
 
 ## Risks and open questions
 

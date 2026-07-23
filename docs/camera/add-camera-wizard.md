@@ -1,8 +1,8 @@
 ---
 title: Modular Add-Camera Wizard Registry
-version: 1.0
-last_validated: 2026-07-22
-official: false
+version: 1.1
+last_validated: 2026-07-23
+official: true
 source: project-internal
 tags: [wizard, registry, ui, onboarding, modularity]
 applies_when: "Adding a new camera backend or implementing the Cameras tab's 'Add camera' flow."
@@ -17,6 +17,11 @@ with zero hardcoded per-brand screens.*
 | Version | Date       | Change   |
 |---------|------------|----------|
 | 1.0     | 2026-07-22 | Initial. |
+| 1.1     | 2026-07-23 | **Implemented and marked `official`** (Epic 2.5 Phase D `13a0697`, Phase E `9533e47`, editing `2abce25`). Added the `supportsEditing`/`buildEditor` pair and the identity-preservation invariant that came with editing a saved camera; documented that renaming is handled generically by the Cameras tab, not by a wizard. Corrected the registry snippet to the as-built surface (`isRegistered`, typed errors, no `asDefault`) and the EZVIZ secret key to the shipped `'verificationCode'`. |
+
+> **Spec version vs. code version.** Versioned independently of the package; a revision row names the
+> commits whose behaviour it describes. When code and this document disagree, the code is the source
+> of truth and this file is the bug.
 
 ## Problem
 
@@ -66,6 +71,21 @@ abstract class CameraSetupWizard {
     required ValueChanged<CameraProfile> onComplete,
     required VoidCallback onCancel,
   });
+
+  /// Whether [buildEditor] is implemented — drives whether a saved camera of
+  /// this backend offers an "Edit" action. A capability *query*, so the UI never
+  /// branches on the backend type string.
+  bool get supportsEditing => false;
+
+  /// Re-open an already-saved profile for editing. Only called when
+  /// [supportsEditing] is true; the base implementation throws
+  /// [UnsupportedError].
+  Widget buildEditor(
+    BuildContext context, {
+    required CameraProfile profile,
+    required ValueChanged<CameraProfile> onComplete,
+    required VoidCallback onCancel,
+  });
 }
 ```
 
@@ -75,22 +95,59 @@ internal step sequence (EZVIZ's steps: login → device list → verification co
 steps; it only knows the entry point (`build`) and that it eventually calls `onComplete` or
 `onCancel`.
 
+### Editing is opt-in
+
+`supportsEditing`/`buildEditor` default to "not supported", mirroring how `CameraAdapter.setPan`/
+`setTilt` default to throwing `UnsupportedError`: a backend whose setup is a pure device picker has
+nothing to edit, and one whose setup is a vendor cloud sign-in may not be re-enterable field by
+field. Those inherit the default and write no dead stub (interface segregation).
+
+**Three invariants every implementation honors** — the first two apply to `build` and `buildEditor`
+alike, the third only to `buildEditor`:
+
+1. **The profile passed to `onComplete` is secret-free.** Any secret is written to
+   `CameraSecretStore` under `profile.id` *before* `onComplete` fires. If that write throws, neither
+   callback fires — otherwise the caller persists a profile whose secret is unreachable.
+2. **Exactly one of `onComplete`/`onCancel` fires, exactly once.** The caller pops a route in either,
+   so a second call pops a second route.
+3. **`buildEditor` preserves identity.** The returned profile keeps the incoming `id`, `createdAt`
+   and `isDefault` — build it with `copyWith`, never `CameraProfile.create`. A fresh `id` orphans the
+   secret stored under the old one (secrets are keyed by profile id, with no way to reach them
+   afterwards) and silently drops the user's default-camera choice. This is precisely why editing is
+   a distinct entry point rather than "run the setup flow again".
+
+An editor that collects a secret should re-verify connectivity before completing, exactly as `build`
+does — an edit that saves an unreachable endpoint is no better than an add that does.
+
+**Renaming is not a wizard concern.** `CameraProfile.displayName` is a plain field on the generic
+profile, so the Cameras tab renames any camera itself via `CameraSession.updateProfile` — including
+backends with no editor of their own.
+
 ### `CameraSetupWizardRegistry`
 
 Same shape as `CameraAdapterRegistry`, but for UI:
 
 ```dart
 class CameraSetupWizardRegistry {
-  /// Register a wizard factory for a backend type.
-  void register(String type, CameraSetupWizard Function() factory);
-  
-  /// Create a wizard instance for a type.
-  CameraSetupWizard create(String type) => ...
-  
-  /// Get all registered types (for the "Add camera" tile chooser).
-  List<String> get registeredTypes => ...
+  /// Register a wizard factory. Throws ArgumentError on an empty or duplicate type.
+  void register(String type, CameraSetupWizardFactory factory);
+
+  /// A fresh wizard instance per call — a wizard drives a stateful multi-step
+  /// flow, so two concurrent setups must not share one. Throws StateError
+  /// (listing the registered types) on an unknown type.
+  CameraSetupWizard create(String type);
+
+  bool isRegistered(String type);
+
+  /// All registered types in registration order, unmodifiable — this is what
+  /// the "Add camera" tile chooser iterates.
+  List<String> get registeredTypes;
 }
 ```
+
+**Deliberate difference from `CameraAdapterRegistry`: no `asDefault`/`createDefault`.** A default
+*backend* is meaningful; a default *setup wizard* is not, since the chooser always shows every tile.
+The omission is a decision, not an oversight.
 
 Located in `lib/src/setup/camera_setup_wizard_registry.dart` — a deliberately **separate**
 registry from `CameraAdapterRegistry`, respecting Single Responsibility:
@@ -171,7 +228,7 @@ class EzvizSetupWizard extends CameraSetupWizard {
         if (verificationCode != null) {
           await secretStore.setSecret(
             profile.id,
-            'verification_code',
+            kEzvizVerificationCodeSecretKey, // 'verificationCode'
             verificationCode,
           );
         }
