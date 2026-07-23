@@ -1,43 +1,72 @@
 import 'package:ezviz_flutter/ezviz_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
-import '../adapter_types.dart';
-import '../camera_session.dart';
-import '../tabs/preview_tab.dart';
 import 'ezviz_camera_adapter.dart';
 
-/// Onboarding for EZVIZ cloud cameras: sign in with the user's own EZVIZ
-/// account, pick a device, and hand off into the shared [CameraSession] via
-/// [CameraSession.switchTo] + [CameraSession.openDevice].
-///
-/// Playback itself is not this widget's job — once connected, it renders the
-/// same [PreviewTab] every other backend uses, driven by [EzvizCameraAdapter]
-/// through the ordinary [CameraAdapter] contract. This widget only owns the
-/// three onboarding steps: sign-in, device list + verification code, and the
-/// brief "connecting" transition between them and the shared session.
-class EzvizSetupWizard extends StatefulWidget {
-  const EzvizSetupWizard({super.key, required this.session});
+/// Called when the user picks a device. Returning a [Future] lets the flow show
+/// a spinner while the caller does whatever it does with the choice — open a
+/// session, mint a profile, write a secret — and surface a thrown error inline.
+typedef EzvizDeviceChosen = Future<void> Function(
+  CameraDevice device,
+  String? verificationCode,
+);
 
-  final CameraSession session;
+/// The EZVIZ onboarding steps, with no opinion about what happens afterwards.
+///
+/// Owns exactly three things: sign in with the user's own EZVIZ account, list
+/// that account's devices, and collect the verification code an encrypted
+/// device needs. It then hands the chosen device to [onDeviceChosen] and stops
+/// — it does not open cameras, drive a [CameraSession], or persist anything.
+///
+/// That split is the point. The same steps are needed whether the caller wants
+/// to connect immediately (the temporary `EzvizBridgeView`) or mint a
+/// `CameraProfile` for later (`EzvizSetupWizard`), so the flow lives here once
+/// and both wrap it. Previously this logic was fused to the session inside
+/// `ezviz_setup_wizard.dart`.
+///
+/// **This widget deliberately persists nothing.** The old version cached the
+/// verification code in a bespoke `ezviz_tab.verification_code`
+/// `SharedPreferences` key — the per-camera-type storage hack that Epic 2.5
+/// exists to remove (`state-management` Rule 6). Secrets now go to a
+/// `CameraSecretStore`, keyed by profile id, which only the caller can do
+/// because only the caller mints the profile.
+class EzvizWizardFlow extends StatefulWidget {
+  const EzvizWizardFlow({
+    super.key,
+    required this.onDeviceChosen,
+    this.onBeforeSignOut,
+    this.onCancel,
+  });
+
+  /// Invoked with the picked device and the verification code as typed
+  /// (`null` when blank). Throw to have the message shown inline.
+  final EzvizDeviceChosen onDeviceChosen;
+
+  /// Optional cleanup run before EZVIZ sign-out — e.g. closing a session that
+  /// is currently streaming from the account being signed out of.
+  final Future<void> Function()? onBeforeSignOut;
+
+  /// When non-null, a "Cancel" affordance is offered on the sign-in step.
+  final VoidCallback? onCancel;
 
   @override
-  State<EzvizSetupWizard> createState() => _EzvizSetupWizardState();
+  State<EzvizWizardFlow> createState() => EzvizWizardFlowState();
 }
 
 enum _WizardStep { signIn, devices, connecting }
 
-class _EzvizSetupWizardState extends State<EzvizSetupWizard>
+/// Public so a host can hold a `GlobalKey<EzvizWizardFlowState>` and call
+/// [reloadDevices] — used by `EzvizBridgeView`'s "Switch EZVIZ device" button,
+/// which must refresh the list without tearing the flow down and re-running
+/// SDK init.
+class EzvizWizardFlowState extends State<EzvizWizardFlow>
     with WidgetsBindingObserver {
-  static const _prefsCodeKey = 'ezviz_tab.verification_code';
-
   final _codeController = TextEditingController();
 
   _WizardStep _step = _WizardStep.signIn;
   bool _busy = false;
   String? _error;
-  bool _showDeviceList = false;
 
   /// Set right before [EzvizAuthManager.openLoginPage] launches the hosted
   /// login page, cleared once we've checked for a token on the next resume.
@@ -69,14 +98,16 @@ class _EzvizSetupWizardState extends State<EzvizSetupWizard>
     }
   }
 
+  /// Reloads the account's device list. Safe to call from a host widget.
+  Future<void> reloadDevices() async {
+    setState(() => _step = _WizardStep.devices);
+    await _loadDevices();
+  }
+
   /// `initSDK` must run *before* `getAccessToken` (see
   /// `ezviz_camera_adapter.dart`'s doc comment and `history/2026-W30.md` for
   /// the native-side confirmation this was carried over from `ezviz_tab.dart`).
   Future<void> _bootstrap() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedCode = prefs.getString(_prefsCodeKey);
-    if (savedCode != null) _codeController.text = savedCode;
-
     try {
       await EzvizManager.shared()
           .initSDK(EzvizInitOptions(appKey: kEzvizAppKey, accessToken: ''))
@@ -152,9 +183,7 @@ class _EzvizSetupWizardState extends State<EzvizSetupWizard>
       _error = null;
     });
     try {
-      if (widget.session.adapterType == kEzvizAdapterType) {
-        await widget.session.close();
-      }
+      await widget.onBeforeSignOut?.call();
       await EzvizAuthManager.logout();
       if (!mounted) return;
       setState(() {
@@ -164,11 +193,6 @@ class _EzvizSetupWizardState extends State<EzvizSetupWizard>
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  Future<void> _savePref(String key, String value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(key, value);
   }
 
   Future<void> _loadDevices() async {
@@ -188,43 +212,33 @@ class _EzvizSetupWizardState extends State<EzvizSetupWizard>
     }
   }
 
-  Future<void> _connect(EzvizDeviceInfo info) async {
+  Future<void> _choose(EzvizDeviceInfo info) async {
     final code = _codeController.text.trim();
     setState(() {
       _step = _WizardStep.connecting;
-      _showDeviceList = false;
       _error = null;
     });
+    final device = CameraDevice(
+      id: info.deviceSerial,
+      name: info.deviceName,
+      lensFacing: CameraLensFacing.external,
+      metadata: <String, dynamic>{
+        'brand': 'ezviz',
+        // Advisory only — the adapter reports hasPan/hasTilt false until
+        // setPan/setTilt are actually wired (camera-adapter-authoring §2).
+        'isSupportPTZ': info.isSupportPTZ,
+        'cameraNum': info.cameraNum,
+      },
+    );
     try {
-      await widget.session.switchTo(kEzvizAdapterType);
-      final device = CameraDevice(
-        id: info.deviceSerial,
-        name: info.deviceName,
-        lensFacing: CameraLensFacing.external,
-        metadata: <String, dynamic>{
-          'brand': 'ezviz',
-          'isSupportPTZ': info.isSupportPTZ,
-          'cameraNum': info.cameraNum,
-          if (code.isNotEmpty) 'verificationCode': code,
-        },
-      );
-      await widget.session.openDevice(device);
+      await widget.onDeviceChosen(device, code.isEmpty ? null : code);
       if (!mounted) return;
-      // Always land back on _step = devices, even on success: build()'s
-      // connected-view branch takes priority while isOpen stays true, but
-      // the moment the session is closed by ANY path — this wizard's own
-      // buttons, or PreviewTab's own "Disconnect" button reached through the
-      // reused connected view, which calls session.close() directly and has
-      // no way to notify this wizard — that branch stops matching and falls
-      // through to this switch. Leaving _step at .connecting (as it was set
-      // above) meant that fallback rendered a permanent spinner instead of
-      // the device list; this is the general fix for that whole bug class,
-      // not just the specific buttons already handled by _switchDevice()/
-      // _useBuiltin().
-      setState(() {
-        _step = _WizardStep.devices;
-        _error = widget.session.error;
-      });
+      // Always land back on `devices`, even on success. A host may render its
+      // own view over this flow while connected; the moment that view goes
+      // away — by any path, including one this widget never hears about —
+      // this step is what shows. Leaving it at `connecting` rendered a
+      // permanent spinner, which was the general form of a whole bug class.
+      setState(() => _step = _WizardStep.devices);
     } on Object catch (e) {
       if (!mounted) return;
       setState(() {
@@ -234,61 +248,16 @@ class _EzvizSetupWizardState extends State<EzvizSetupWizard>
     }
   }
 
-  Future<void> _switchDevice() async {
-    setState(() {
-      _busy = true;
-      _showDeviceList = true;
-      _step = _WizardStep.devices;
-    });
-    // Refreshes the wizard's own device list (what _buildDevicesStep()
-    // actually renders) — session.refreshDevices() would populate
-    // CameraSession's list instead, which this screen never reads.
-    await _loadDevices();
-  }
-
-  Future<void> _useBuiltin() async {
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await widget.session.switchTo(kBuiltinAdapterType);
-      // adapterType is now builtin, so the connected-view branch in build()
-      // stops matching and falls through to the _step switch below — reset
-      // it off whatever it was left at (.connecting, from the original
-      // _connect() call) or it renders a permanent spinner. Devices are
-      // still loaded (still signed in), so the device list is the right
-      // landing spot for reconnecting to EZVIZ later.
-      if (mounted) setState(() => _step = _WizardStep.devices);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.session,
-      builder: (context, _) {
-        if (widget.session.adapterType == kEzvizAdapterType &&
-            widget.session.isOpen &&
-            !_showDeviceList) {
-          return _ConnectedEzvizView(
-            session: widget.session,
-            onSwitchDevice: _busy ? null : _switchDevice,
-            onUseBuiltin: _busy ? null : _useBuiltin,
-          );
-        }
-        switch (_step) {
-          case _WizardStep.signIn:
-            return _buildSignInStep();
-          case _WizardStep.devices:
-            return _buildDevicesStep();
-          case _WizardStep.connecting:
-            return const Center(child: CircularProgressIndicator());
-        }
-      },
-    );
+    switch (_step) {
+      case _WizardStep.signIn:
+        return _buildSignInStep();
+      case _WizardStep.devices:
+        return _buildDevicesStep();
+      case _WizardStep.connecting:
+        return const Center(child: CircularProgressIndicator());
+    }
   }
 
   Widget _buildSignInStep() {
@@ -320,6 +289,13 @@ class _EzvizSetupWizardState extends State<EzvizSetupWizard>
               onPressed: _signIn,
               child: const Text('Sign in with EZVIZ'),
             ),
+            if (widget.onCancel != null) ...[
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: widget.onCancel,
+                child: const Text('Cancel'),
+              ),
+            ],
           ],
         ),
       ),
@@ -337,7 +313,6 @@ class _EzvizSetupWizardState extends State<EzvizSetupWizard>
               labelText: 'Verification code (only if encrypted)',
               border: OutlineInputBorder(),
             ),
-            onChanged: (value) => _savePref(_prefsCodeKey, value),
           ),
         ),
         Expanded(
@@ -355,7 +330,7 @@ class _EzvizSetupWizardState extends State<EzvizSetupWizard>
                       leading: const Icon(Icons.videocam_outlined),
                       title: Text(device.deviceName),
                       subtitle: Text(device.deviceSerial),
-                      onTap: _busy ? null : () => _connect(device),
+                      onTap: _busy ? null : () => _choose(device),
                     );
                   },
                 ),
@@ -388,49 +363,6 @@ class _EzvizSetupWizardState extends State<EzvizSetupWizard>
             ],
           ),
         ),
-      ],
-    );
-  }
-}
-
-/// The connected state: a small backend-switch affordance above the same
-/// shared [PreviewTab] every other backend uses.
-class _ConnectedEzvizView extends StatelessWidget {
-  const _ConnectedEzvizView({
-    required this.session,
-    required this.onSwitchDevice,
-    required this.onUseBuiltin,
-  });
-
-  final CameraSession session;
-  final VoidCallback? onSwitchDevice;
-  final VoidCallback? onUseBuiltin;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: onSwitchDevice,
-                  child: const Text('Switch EZVIZ device'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: onUseBuiltin,
-                  child: const Text('Use phone camera instead'),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(child: PreviewTab(session: session)),
       ],
     );
   }

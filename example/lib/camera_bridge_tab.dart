@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'camera_session.dart';
-import 'ezviz/ezviz_setup_wizard.dart';
+import 'ezviz/ezviz_bridge_view.dart';
 import 'onvif/onvif_connect_view.dart';
 
 enum _BridgeMode { cloud, onvif }
 
 /// Entry point for network/IP-camera backends: a mode selector — Cloud
 /// (EZVIZ) vs local-network (ONVIF) — in front of the existing
-/// [EzvizSetupWizard] or the new [OnvifConnectView].
+/// [EzvizBridgeView] or the new [OnvifConnectView].
 ///
 /// This widget swaps its child by ordinary conditional rendering (not its
 /// own nested `IndexedStack`), deliberately: when [_mode] changes, the
@@ -40,7 +40,7 @@ class _CameraBridgeTabState extends State<CameraBridgeTab> {
         return Column(
           children: [
             _buildChangeModeBar(),
-            Expanded(child: EzvizSetupWizard(session: widget.session)),
+            Expanded(child: EzvizBridgeView(session: widget.session)),
           ],
         );
       case _BridgeMode.onvif:

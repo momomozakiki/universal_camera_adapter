@@ -24,9 +24,13 @@ class OnvifConnectView extends StatefulWidget {
 class _OnvifConnectViewState extends State<OnvifConnectView> {
   static const _prefsHostKey = 'onvif_tab.host';
   static const _prefsUsernameKey = 'onvif_tab.username';
-  // Plaintext SharedPreferences, matching EzvizSetupWizard's own verification-code
-  // persistence (`ezviz_setup_wizard.dart`'s `_prefsCodeKey`) — same tradeoff,
-  // same kind of value (a device verification code, not an account password).
+  // Plaintext SharedPreferences. This once matched the EZVIZ wizard's own
+  // verification-code persistence; that key is gone as of Epic 2.5 Phase D
+  // (secrets now go to CameraSecretStore, keyed by profile id), leaving these
+  // three the **last** raw-prefs credentials in the tree. Phase E deletes this
+  // whole file — its behavior moves into OnvifSetupWizard, which writes the
+  // password to the secret store and keeps only host/port/username in the
+  // profile. Do not copy this pattern (`state-management` Rule 6).
   static const _prefsPasswordKey = 'onvif_tab.password';
 
   final _hostController = TextEditingController();
