@@ -1,6 +1,6 @@
 ---
 title: Camera Feature Matrix Model
-version: 1.1
+version: 1.2
 last_validated: 2026-07-23
 official: false
 source: project-internal
@@ -17,6 +17,13 @@ applies_when: "Building a UI to display/query camera capabilities or implementin
 |---------|------------|----------|
 | 1.0     | 2026-07-22 | Initial. |
 | 1.1     | 2026-07-23 | Implemented in Epic 2.5 Phase A (`8a390ee`). Recorded the actual derivation direction (matrix derived *from* `CameraCapabilities`, for backward compatibility) and the future `frameStream` throughput ceiling for scanning. |
+| 1.2     | 2026-07-23 | Two as-built corrections found by spec review. (1) "Contract change" claimed `featureMatrix` is a **required** getter every backend must implement — it is concrete and optional to override. (2) The EZVIZ entry claimed PTZ is **queried at runtime**; the shipped adapter deliberately reports all-false and refuses to read `isSupportPTZ`. Also added a `withStatuses` override example, a note that `unvalidated` is transitional, and this versioning note. |
+
+> **Spec version vs. code version.** This document is versioned independently of the package. Each
+> revision row names the commit whose behaviour it describes: **v1.1 and v1.2 both describe
+> `8a390ee`** (Epic 2.5 Phase A) — v1.2 changed no code, it only corrected two places where this
+> document contradicted what Phase A actually shipped. When code and spec disagree, the code is the
+> source of truth and this file is the bug.
 
 ## Problem with today's `CameraCapabilities`
 
@@ -89,6 +96,13 @@ enum CameraFeatureStatus {
 
 This satisfies the distinction: "phone webcam doesn't support pan" (unsupported) vs. "ONVIF adapter
 has a pan method wired but hasn't been tested against a real PTZ dome" (unvalidated).
+
+> **`unvalidated` is a transitional state, not a resting place.** It exists so a backend can be
+> honest about what it has not yet proven, but every feature left there shows the user a permanent
+> "unknown" — the UI can neither offer the feature confidently nor hide it. Once a feature has been
+> exercised against real hardware, promote it to `supported` or demote it to `unsupported` in that
+> backend's override, and record the verification in the weekly ledger. Treat a long-lived
+> `unvalidated` as outstanding work, the same way a long-lived `TODO` is.
 
 ### `CameraFeatureSupport` value type
 
@@ -224,10 +238,36 @@ class, silently breaking `==`, `hashCode`, and `toString`.
 New consumers wanting bundles or tri-state read `featureMatrix` directly. Existing consumers read
 `capabilities` as before, with no code changes.
 
-**Contract change:** adding `featureMatrix` as a required getter means every backend
-(`FlutterCameraAdapter`, `ONVIFCameraAdapter`, `EzvizCameraAdapter`) must implement it. The
-ROADMAP should state this lands in **v1.2** and that all three gain `featureMatrix` together, not
-piecemeal.
+**Not a breaking contract change** *(corrected in v1.2 — the v1.0 draft said the opposite)*. The base
+`CameraAdapter` provides a **concrete** `featureMatrix` getter with a working default derivation, so
+**no backend is forced to implement it**. Backends override **only** when that default would be wrong
+— which is why the three did *not* have to gain it together, and why adding a tenth backend or a
+tenth feature does not touch the other nine.
+
+The as-built proof: `FlutterCameraAdapter` and `test/mock_camera_adapter.dart` contain **zero**
+occurrences of `featureMatrix` and compile and pass the suite unchanged. Only `ONVIFCameraAdapter`
+(whose `capabilities` throws, so the default cannot read it) and `EzvizCameraAdapter` (downgrading
+`frameCapture`/scanning) override.
+
+Overriding does **not** mean rebuilding the whole matrix. Start from the inherited one and change
+only what differs — this is what `withStatuses` exists for:
+
+```dart
+// example/lib/ezviz/ezviz_camera_adapter.dart — the real override.
+@override
+CameraFeatureMatrix get featureMatrix {
+  return super.featureMatrix.withStatuses(
+    const <CameraFeature, CameraFeatureStatus>{
+      CameraFeature.frameCapture: CameraFeatureStatus.unvalidated,
+      CameraFeature.qrScanning: CameraFeatureStatus.unvalidated,
+      CameraFeature.barcodeScanning: CameraFeatureStatus.unvalidated,
+    },
+  );
+}
+```
+
+Build the matrix explicitly (via `CameraFeatureMatrix.fromStatuses`) only when the inherited value is
+unusable — as in `ONVIFCameraAdapter`, where reading `super.featureMatrix` would throw.
 
 ## Per-backend matrices (design-time reference)
 
@@ -270,23 +310,38 @@ This is the worked example for a **full-featured PTZ + frame-capture backend**.
 
 ### `EzvizCameraAdapter` (EZVIZ cloud cameras)
 
-Planned for v1.3. Feature support depends on the specific EZVIZ model queried post-open:
+**Shipped 2026-07-22** in `example/lib/ezviz/ezviz_camera_adapter.dart` (not in `lib/` — see the
+ROADMAP for why the vendored `ezviz_flutter` path dep keeps it out of the published package).
+
+**As built today** — `capabilities` returns a plain `const CameraCapabilities()` and the override
+downgrades capture/scanning:
 
 ```
-zoom             → depends on model (fixed-lens: unsupported; PTZ dome: supported; some cameras have digital zoom only—must be flagged as a distinct concern)
-pan              → depends on model (queried from device capability response post-open)
-tilt             → depends on model (queried from device capability response post-open)
-frameCapture     → resolvable, not yet wired (see 3.5 below; the underlying native SDK supports it, the vendored plugin doesn't call it yet)
-qrScanning       → unvalidated (depends on frameCapture being wired up)
-barcodeScanning  → unvalidated (depends on frameCapture being wired up)
-textRecognitionOcr → unvalidated (depends on frameCapture being wired up)
+zoom             → unsupported (setZoom throws UnsupportedError — not implemented)
+pan              → unsupported (setPan not implemented; base-class default throw)
+tilt             → unsupported (setTilt not implemented; base-class default throw)
+frameCapture     → unvalidated (resolvable, not yet wired — see the spike below: the native SDK
+                   supports capturePicture, the vendored plugin's implementation returns null)
+qrScanning       → unvalidated (gated behind frameCapture)
+barcodeScanning  → unvalidated (gated behind frameCapture)
+textRecognitionOcr → unvalidated (gated behind frameCapture)
 twoWayAudio      → unvalidated (placeholder)
 motionEvents     → unvalidated (placeholder)
 ```
 
-Notably, PTZ capabilities are **queried at runtime** post-open (from the SDK's device-capability
-response), not assumed by backend type—a CS-H6c reports none, while a PTZ dome would. This is why
-the matrix must be computed dynamically, not hardcoded per backend name.
+> **Corrected in v1.2.** The v1.0 draft claimed *"PTZ capabilities are **queried at runtime**
+> post-open (from the SDK's device-capability response), not assumed by backend type."* The shipped
+> adapter does the opposite, **deliberately**: it reports `hasPan`/`hasTilt` as `false` and its
+> code-comment states it will *not* read `EzvizDeviceInfo.isSupportPTZ`, because
+> `camera-adapter-authoring` §2 requires those flags to reflect a **wired** `setPan`/`setTilt`, not
+> raw device support. Advertising `hasPan: true` for a PTZ dome whose `setPan` throws
+> `UnsupportedError` would be exactly the optimistic guess the contract forbids. `isSupportPTZ` is
+> still carried in `device.metadata` as **advisory** information for the UI.
+
+**Target state**, once `setPan`/`setTilt`/`setZoom` are actually implemented: query the SDK's
+device-capability response post-open and report per model — a CS-H6c reports no PTZ, a dome does.
+At that point the flags become genuinely dynamic, which is the reason the matrix is computed rather
+than hardcoded per backend name. Until then, "queried at runtime" describes the plan, not the code.
 
 ## The EZVIZ platform-view frame-capture question — spiked, resolved
 
