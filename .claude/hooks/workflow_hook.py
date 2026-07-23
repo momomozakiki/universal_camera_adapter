@@ -371,10 +371,19 @@ def run_env_checks(config: Dict[str, Any], project_root: Path) -> List[str]:
             lines.append(f"  - {name}: {'found' if exists else 'NOT FOUND'} ({raw_path})")
             continue
 
+        # Resolve before exec. A bare name like "flutter" is a .bat shim on
+        # Windows, and CreateProcess only ever appends .exe when searching PATH
+        # -- so handing subprocess the bare name raises FileNotFoundError even
+        # though the tool is installed. shutil.which honours PATHEXT and finds
+        # it; the resolved path then runs fine with shell=False (no shell, so no
+        # cmd quoting and a genuinely missing tool still raises).
+        exe = str(tool_path) if tool_path.exists() else (_which(raw_path) or raw_path)
+
         try:
             res = subprocess.run(
-                [str(raw_path), str(version_flag)],
+                [str(exe), str(version_flag)],
                 capture_output=True, text=True, timeout=15,
+                encoding="utf-8", errors="replace",
             )
             ver = (res.stdout or res.stderr or "").strip().splitlines()
             ver_str = ver[0] if ver else "(no output)"

@@ -18,8 +18,10 @@ import json
 import os
 import sys
 import tempfile
+import types
 import unittest
 import uuid
+from unittest import mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -174,6 +176,96 @@ class TestSessionStart(BaseCase):
         ctx = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("the real task", ctx)
         self.assertNotIn("line below", ctx)
+
+
+class TestEnvCheckShimResolution(unittest.TestCase):
+    """`run_env_checks` must resolve a bare tool name via PATHEXT before exec.
+
+    On Windows the configured tools (`dart`, `flutter`) are `.bat` shims.
+    CreateProcess only appends `.exe` when searching PATH, so passing the bare
+    name to subprocess raises FileNotFoundError and the tool is misreported as
+    NOT FOUND even when installed. These tests pin the resolution behaviour
+    without depending on a real `.bat` existing on the runner.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        self.calls = []
+        self.addCleanup(self.tmp.cleanup)
+
+    def stub(self, which_result, run_result):
+        """Stub `_which` and `subprocess.run`, recording the run() call.
+
+        Patched via mock so the real `subprocess` module is restored even if an
+        assertion fails mid-test.
+        """
+        def fake_run(args, **kwargs):
+            self.calls.append((args, kwargs))
+            if isinstance(run_result, Exception):
+                raise run_result
+            return run_result
+
+        for patcher in (
+            mock.patch.object(workflow_hook, "_which", lambda cmd: which_result),
+            mock.patch.object(workflow_hook.subprocess, "run", fake_run),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def config(path):
+        return {"env_check": {"tool_paths": {
+            "flutter": {"path": path, "version_flag": "--version"}}}}
+
+    def test_bare_name_is_resolved_via_which_before_exec(self):
+        resolved = r"C:\puro\envs\default\flutter\bin\flutter.BAT"
+        self.stub(resolved, types.SimpleNamespace(stdout="Flutter 3.44.0\n", stderr=""))
+
+        lines = workflow_hook.run_env_checks(self.config("flutter"), self.project)
+
+        self.assertEqual(lines, ["  - flutter: Flutter 3.44.0"])
+        # The regression that would silently reappear: exec'ing the bare name.
+        args, kwargs = self.calls[0]
+        self.assertEqual(args, [resolved, "--version"])
+        self.assertNotIn("shell", kwargs)
+
+    def test_resolution_does_not_leak_absolute_path_into_output(self):
+        # The reported line stays machine-independent even though exec resolved.
+        self.stub(r"C:\somewhere\flutter.BAT", types.SimpleNamespace(stdout="", stderr=""))
+        lines = workflow_hook.run_env_checks(self.config("flutter"), self.project)
+        self.assertEqual(lines, ["  - flutter: (no output)"])
+
+    def test_unresolvable_name_reports_not_found(self):
+        self.stub(None, FileNotFoundError(2, "The system cannot find the file specified"))
+        lines = workflow_hook.run_env_checks(self.config("ghost-tool"), self.project)
+        self.assertEqual(lines, ["  - flutter: NOT FOUND (ghost-tool)"])
+
+    def test_subprocess_failure_still_reports_not_found(self):
+        # `which` resolves but exec blows up -> must not crash the hook.
+        self.stub(r"C:\somewhere\flutter.BAT", OSError("boom"))
+        lines = workflow_hook.run_env_checks(self.config("flutter"), self.project)
+        self.assertEqual(lines, ["  - flutter: NOT FOUND (flutter)"])
+
+    def test_existing_relative_path_wins_over_which(self):
+        # A repo-vendored tool referenced by relative path must not regress.
+        vendored = self.project / "tool.bin"
+        vendored.write_text("x", encoding="utf-8")
+        self.stub(r"C:\elsewhere\tool.exe", types.SimpleNamespace(stdout="v1\n", stderr=""))
+
+        lines = workflow_hook.run_env_checks(self.config("tool.bin"), self.project)
+
+        self.assertEqual(lines, ["  - flutter: v1"])
+        self.assertEqual(self.calls[0][0], [str(vendored), "--version"])
+
+    def test_output_is_decoded_as_utf8(self):
+        self.stub(r"C:\somewhere\flutter.BAT",
+                  types.SimpleNamespace(stdout="Flutter 3.44.0 \u2022 channel stable\n", stderr=""))
+
+        lines = workflow_hook.run_env_checks(self.config("flutter"), self.project)
+
+        self.assertIn("\u2022", lines[0])
+        self.assertEqual(self.calls[0][1].get("encoding"), "utf-8")
 
 
 class TestPostToolUse(BaseCase):
