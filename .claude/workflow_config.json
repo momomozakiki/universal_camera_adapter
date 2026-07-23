@@ -10,11 +10,11 @@
   "env_check": {
     "tool_paths": {
       "dart": {
-        "path": "C:\\Users\\kbsim\\.puro\\envs\\default\\flutter\\bin\\dart.bat",
+        "path": "dart",
         "version_flag": "--version"
       },
       "flutter": {
-        "path": "C:\\Users\\kbsim\\.puro\\envs\\default\\flutter\\bin\\flutter.bat",
+        "path": "flutter",
         "version_flag": "--version"
       },
       "python": {
