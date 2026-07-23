@@ -421,4 +421,96 @@ void main() {
       expect(adapter.openedWith?.id, 'dev-new');
     });
   });
+
+  group('CameraSession — updateProfile', () {
+    test('persists the edit without adding a second profile', () async {
+      final adapter = _RecordingAdapter(const [
+        CameraDevice(id: 'dev-p1', name: 'Cam'),
+      ]);
+      final registry = CameraAdapterRegistry()
+        ..register('builtin', () => adapter, asDefault: true);
+      final store = _FakeProfileStore([profile(id: 'p1', name: 'Old name')]);
+
+      final session = CameraSession(registry, profileStore: store);
+      await session.loadProfiles();
+      await session.updateProfile(
+        session.profiles.single.copyWith(displayName: 'New name'),
+      );
+
+      expect(store.saved, hasLength(1), reason: 'save() upserts on id');
+      expect(store.saved.single.displayName, 'New name');
+      expect(session.profiles.single.displayName, 'New name');
+    });
+
+    test('editing the active camera re-opens it on the new settings', () async {
+      final adapter = _RecordingAdapter(const [
+        CameraDevice(id: 'dev-p1', name: 'Cam'),
+        CameraDevice(id: 'dev-p2', name: 'Cam moved'),
+      ]);
+      final registry = CameraAdapterRegistry()
+        ..register('builtin', () => adapter, asDefault: true);
+      final store = _FakeProfileStore([profile(id: 'p1')]);
+
+      final session = CameraSession(registry, profileStore: store);
+      await session.restore();
+      expect(adapter.openedWith?.id, 'dev-p1');
+
+      await session.updateProfile(
+        session.profiles.single.copyWith(
+          device: const CameraDevice(id: 'dev-p2', name: 'Cam moved'),
+        ),
+      );
+
+      expect(adapter.openedWith?.id, 'dev-p2');
+      expect(session.activeProfile?.id, 'p1', reason: 'same profile identity');
+    });
+
+    test('editing an idle camera leaves the live one alone', () async {
+      final adapter = _RecordingAdapter(const [
+        CameraDevice(id: 'dev-live', name: 'Live'),
+        CameraDevice(id: 'dev-idle', name: 'Idle'),
+      ]);
+      final registry = CameraAdapterRegistry()
+        ..register('builtin', () => adapter, asDefault: true);
+      final store = _FakeProfileStore([
+        profile(
+          id: 'live',
+          isDefault: true,
+          device: const CameraDevice(id: 'dev-live', name: 'Live'),
+        ),
+        profile(
+          id: 'idle',
+          device: const CameraDevice(id: 'dev-idle', name: 'Idle'),
+        ),
+      ]);
+
+      final session = CameraSession(registry, profileStore: store);
+      await session.restore();
+      expect(session.activeProfile?.id, 'live');
+
+      final idle = session.profiles.firstWhere((p) => p.id == 'idle');
+      await session.updateProfile(idle.copyWith(displayName: 'Renamed'));
+
+      expect(adapter.openedWith?.id, 'dev-live',
+          reason: 'editing an idle camera must not steal the live one');
+      expect(session.activeProfile?.id, 'live');
+      expect(
+        session.profiles.firstWhere((p) => p.id == 'idle').displayName,
+        'Renamed',
+      );
+    });
+
+    test('is a no-op without a profile store', () async {
+      final adapter = _RecordingAdapter(const [
+        CameraDevice(id: 'dev-p1', name: 'Cam'),
+      ]);
+      final registry = CameraAdapterRegistry()
+        ..register('builtin', () => adapter, asDefault: true);
+
+      final session = CameraSession(registry);
+      await session.updateProfile(profile(id: 'p1'));
+
+      expect(session.profiles, isEmpty);
+    });
+  });
 }

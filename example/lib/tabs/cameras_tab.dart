@@ -13,7 +13,9 @@ import '../camera_session.dart';
 /// [CameraSession.profiles], and the "Add camera" sheet renders one tile per
 /// [CameraSetupWizardRegistry.registeredTypes] using each wizard's own
 /// `displayName`/`icon`. Registering a tenth backend adds a tenth tile here
-/// with no edit to this file.
+/// with no edit to this file. Likewise the per-camera **Edit** action appears
+/// only when the registered wizard reports [CameraSetupWizard.supportsEditing] —
+/// a capability query, not a backend-type check.
 class CamerasTab extends StatelessWidget {
   const CamerasTab({super.key, required this.session, required this.wizards});
 
@@ -44,6 +46,72 @@ class CamerasTab extends StatelessWidget {
     );
     if (profile == null) return;
     await session.saveAndSwitchTo(profile);
+  }
+
+  /// Whether a saved camera can be edited: asked of its **registered wizard**,
+  /// never of its backend-type string, so this file still names no backend.
+  /// A profile can outlive its backend's registration (an app build that no
+  /// longer registers it), so the lookup is guarded rather than assumed.
+  bool _canEdit(CameraProfile profile) =>
+      wizards.isRegistered(profile.backendType) &&
+      wizards.create(profile.backendType).supportsEditing;
+
+  Future<void> _editCamera(BuildContext context, CameraProfile profile) async {
+    final wizard = wizards.create(profile.backendType);
+    final updated = await Navigator.of(context).push<CameraProfile>(
+      MaterialPageRoute<CameraProfile>(
+        builder: (routeContext) => Scaffold(
+          appBar: AppBar(title: Text(profile.displayName)),
+          body: wizard.buildEditor(
+            routeContext,
+            profile: profile,
+            // Same single-pop-per-callback contract as _addCamera.
+            onComplete: (edited) => Navigator.of(routeContext).pop(edited),
+            onCancel: () => Navigator.of(routeContext).pop(),
+          ),
+        ),
+      ),
+    );
+    if (updated == null) return;
+    await session.updateProfile(updated);
+  }
+
+  /// Renaming is backend-agnostic — [CameraProfile.displayName] is a plain label
+  /// on the generic profile — so every saved camera offers it, including
+  /// backends with no editor of their own.
+  Future<void> _renameCamera(BuildContext context, CameraProfile profile) async {
+    final controller = TextEditingController(text: profile.displayName);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename camera'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Name',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) => Navigator.of(context).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final trimmed = name?.trim();
+    if (trimmed == null || trimmed.isEmpty || trimmed == profile.displayName) {
+      return;
+    }
+    await session.updateProfile(profile.copyWith(displayName: trimmed));
   }
 
   Future<void> _confirmDelete(BuildContext context, CameraProfile profile) async {
@@ -91,8 +159,11 @@ class CamerasTab extends StatelessWidget {
                           session.unavailableProfileIds.contains(profile.id),
                       isOpen: session.isOpen,
                       busy: session.busy,
+                      canEdit: _canEdit(profile),
                       onSelect: () => session.switchToProfile(profile),
                       onSetDefault: () => session.setDefaultProfile(profile.id),
+                      onEdit: () => _editCamera(context, profile),
+                      onRename: () => _renameCamera(context, profile),
                       onDelete: () => _confirmDelete(context, profile),
                     );
                   },
@@ -115,8 +186,11 @@ class _ProfileTile extends StatelessWidget {
     required this.isUnavailable,
     required this.isOpen,
     required this.busy,
+    required this.canEdit,
     required this.onSelect,
     required this.onSetDefault,
+    required this.onEdit,
+    required this.onRename,
     required this.onDelete,
   });
 
@@ -125,8 +199,11 @@ class _ProfileTile extends StatelessWidget {
   final bool isUnavailable;
   final bool isOpen;
   final bool busy;
+  final bool canEdit;
   final VoidCallback onSelect;
   final VoidCallback onSetDefault;
+  final VoidCallback onEdit;
+  final VoidCallback onRename;
   final VoidCallback onDelete;
 
   @override
@@ -170,6 +247,8 @@ class _ProfileTile extends StatelessWidget {
         trailing: PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'default') onSetDefault();
+            if (value == 'edit') onEdit();
+            if (value == 'rename') onRename();
             if (value == 'delete') onDelete();
           },
           itemBuilder: (context) => [
@@ -178,6 +257,15 @@ class _ProfileTile extends StatelessWidget {
                 value: 'default',
                 child: Text('Open this one at startup'),
               ),
+            if (canEdit)
+              const PopupMenuItem<String>(
+                value: 'edit',
+                child: Text('Edit settings'),
+              ),
+            const PopupMenuItem<String>(
+              value: 'rename',
+              child: Text('Rename'),
+            ),
             const PopupMenuItem<String>(
               value: 'delete',
               child: Text('Remove'),

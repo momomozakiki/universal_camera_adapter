@@ -49,12 +49,21 @@ class OnvifSetupDraft {
 ///
 /// Called **before** any network attempt: a typo should fail instantly rather
 /// than after a connection timeout.
+///
+/// Pass [existing] when re-saving an already-saved camera. The returned profile
+/// then keeps that profile's `id`, `createdAt` and `isDefault` instead of
+/// minting a new identity — the `CameraSetupWizard.buildEditor` invariant. A new
+/// id would orphan the password stored under the old one and silently drop the
+/// user's default-camera choice. Keeping this here rather than in the form is
+/// deliberate: it is the security-relevant half of editing, and here it is
+/// testable without a widget, a network, or a platform channel.
 OnvifSetupDraft buildOnvifSetupDraft({
   required String host,
   required String port,
   required String username,
   required String password,
   required String displayName,
+  CameraProfile? existing,
 }) {
   final trimmedHost = host.trim();
   final trimmedPort = port.trim();
@@ -86,7 +95,10 @@ OnvifSetupDraft buildOnvifSetupDraft({
   final device = CameraDevice(
     // host:port is the stable identity of an ONVIF endpoint, and is the same
     // key a restored profile is matched on — an ONVIF device has no reliable
-    // serial to key off.
+    // serial to key off. Editing the host/port therefore changes this id, which
+    // is correct: it is the endpoint's identity, not the profile's. The profile
+    // id below is what stays fixed, and `CameraSession`'s onvif matcher keys on
+    // metadata host/port rather than on this id.
     id: '${credentials.host}:${credentials.port}',
     name: trimmedName.isEmpty ? credentials.host : trimmedName,
     lensFacing: CameraLensFacing.external,
@@ -94,11 +106,15 @@ OnvifSetupDraft buildOnvifSetupDraft({
   );
 
   return OnvifSetupDraft(
-    profile: CameraProfile.create(
-      backendType: kOnvifAdapterType,
-      displayName: device.name,
-      device: device,
-    ),
+    profile: existing == null
+        ? CameraProfile.create(
+            backendType: kOnvifAdapterType,
+            displayName: device.name,
+            device: device,
+          )
+        // copyWith, never create: id / createdAt / isDefault must survive an
+        // edit (see the buildOnvifSetupDraft doc comment).
+        : existing.copyWith(device: device, displayName: device.name),
     password: password.isEmpty ? null : password,
   );
 }
@@ -141,6 +157,27 @@ class OnvifSetupWizard extends CameraSetupWizard {
       onCancel: onCancel,
     );
   }
+
+  /// An ONVIF camera is fully described by four editable fields, so the same
+  /// form serves both adding and editing.
+  @override
+  bool get supportsEditing => true;
+
+  @override
+  Widget buildEditor(
+    BuildContext context, {
+    required CameraProfile profile,
+    required ValueChanged<CameraProfile> onComplete,
+    required VoidCallback onCancel,
+  }) {
+    return _OnvifSetupForm(
+      registry: registry,
+      secretStore: secretStore,
+      onComplete: onComplete,
+      onCancel: onCancel,
+      existing: profile,
+    );
+  }
 }
 
 class _OnvifSetupForm extends StatefulWidget {
@@ -149,12 +186,16 @@ class _OnvifSetupForm extends StatefulWidget {
     required this.secretStore,
     required this.onComplete,
     required this.onCancel,
+    this.existing,
   });
 
   final CameraAdapterRegistry registry;
   final CameraSecretStore secretStore;
   final ValueChanged<CameraProfile> onComplete;
   final VoidCallback onCancel;
+
+  /// The saved camera being edited, or null when adding a new one.
+  final CameraProfile? existing;
 
   @override
   State<_OnvifSetupForm> createState() => _OnvifSetupFormState();
@@ -175,6 +216,54 @@ class _OnvifSetupFormState extends State<_OnvifSetupForm> {
   /// Guards the "exactly one callback, exactly once" invariant against a
   /// double-tap or a late async completion.
   bool _finished = false;
+
+  bool get _isEditing => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    if (existing != null) {
+      _prefillFrom(existing);
+    }
+  }
+
+  /// Fills the form from a saved profile.
+  ///
+  /// The non-secret fields come straight off the profile. They are read
+  /// defensively — `device.metadata` is a `Map<String, dynamic>` that was
+  /// round-tripped through JSON in `shared_preferences`, so a value written by
+  /// an older build (or a hand-edited store) may be any type. A wrong type
+  /// degrades to a blank field, which the user can simply retype; it must never
+  /// throw while building the form (`state-management` Rule 3).
+  void _prefillFrom(CameraProfile profile) {
+    final metadata = profile.device.metadata;
+    _hostController.text = _readText(metadata['host']);
+    final port = _readText(metadata['port']);
+    if (port.isNotEmpty) _portController.text = port;
+    _usernameController.text = _readText(metadata['username']);
+    _nameController.text = profile.displayName;
+    unawaited(_prefillPassword(profile.id));
+  }
+
+  static String _readText(Object? value) =>
+      value is String ? value : (value is int ? '$value' : '');
+
+  /// Loads the stored password back into the field so the user sees their
+  /// current credentials rather than a blank box that silently means "keep".
+  ///
+  /// The tradeoff is accepted deliberately: the plaintext lives in widget state
+  /// for the life of the form and is revealable through the existing visibility
+  /// toggle. It never leaves the device, is never logged, and never reaches the
+  /// persisted profile — the secret/profile split below is unchanged.
+  Future<void> _prefillPassword(String profileId) async {
+    final stored = await widget.secretStore.getSecret(
+      profileId,
+      kOnvifPasswordSecretKey,
+    );
+    if (!mounted || stored == null) return;
+    _passwordController.text = stored;
+  }
 
   @override
   void dispose() {
@@ -202,6 +291,7 @@ class _OnvifSetupFormState extends State<_OnvifSetupForm> {
         username: _usernameController.text,
         password: _passwordController.text,
         displayName: _nameController.text,
+        existing: widget.existing,
       );
 
       // 2. Prove the camera is actually reachable and speaks ONVIF before
@@ -222,13 +312,18 @@ class _OnvifSetupFormState extends State<_OnvifSetupForm> {
       // 3. Write the secret BEFORE completing. If this throws, neither callback
       //    fires, so the caller never persists a profile whose password is
       //    unreachable.
+      //
+      //    When editing, the write is unconditional: clearing the field must
+      //    clear the stored password, and `CameraSecretStore` has no per-key
+      //    delete. Storing '' is the right representation of "no password" —
+      //    `CameraSession` already skips empty secrets when merging.
       final password = draft.password;
-      if (password != null) {
+      if (password != null || _isEditing) {
         setState(() => _status = 'Saving credentials…');
         await widget.secretStore.setSecret(
           draft.profile.id,
           kOnvifPasswordSecretKey,
-          password,
+          password ?? '',
         );
       }
       if (!mounted) return;
@@ -269,10 +364,14 @@ class _OnvifSetupFormState extends State<_OnvifSetupForm> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text(
-          'Works with any ONVIF-compliant camera — Hikvision, Dahua, Reolink, '
-          'Axis, EZVIZ and others. Add as many as you like; each is saved '
-          'separately.',
+        Text(
+          _isEditing
+              ? 'Change any setting below. The connection is re-tested before '
+                  'anything is saved, so a wrong value cannot replace working '
+                  'settings.'
+              : 'Works with any ONVIF-compliant camera — Hikvision, Dahua, '
+                  'Reolink, Axis, EZVIZ and others. Add as many as you like; '
+                  'each is saved separately.',
         ),
         const SizedBox(height: 16),
         TextField(
@@ -355,7 +454,9 @@ class _OnvifSetupFormState extends State<_OnvifSetupForm> {
           ),
         FilledButton(
           onPressed: _busy ? null : _testAndSave,
-          child: const Text('Test connection & save'),
+          child: Text(
+            _isEditing ? 'Test connection & save changes' : 'Test connection & save',
+          ),
         ),
         const SizedBox(height: 8),
         TextButton(

@@ -116,4 +116,41 @@ void main() {
       expect(wizards.registeredTypes.length, 1);
     });
   });
+
+  group('CameraSetupWizard — editing is opt-in', () {
+    test('a wizard that implements nothing extra does not support editing', () {
+      // Interface segregation: a backend whose setup is a pure device picker,
+      // or a vendor sign-in that cannot be re-entered field-by-field, inherits
+      // the default and writes no dead stub.
+      expect(_StubWizard().supportsEditing, isFalse);
+    });
+
+    test('buildEditor throws UnsupportedError by default', () {
+      expect(
+        () => _StubWizard().buildEditor(
+          _NullBuildContext(),
+          profile: _profile,
+          onComplete: (_) {},
+          onCancel: () {},
+        ),
+        throwsUnsupportedError,
+      );
+    });
+  });
+}
+
+final _profile = CameraProfile(
+  id: 'p1',
+  backendType: 'stub',
+  displayName: 'Stub camera',
+  device: const CameraDevice(id: 'dev-1', name: 'Stub camera'),
+  createdAt: DateTime.utc(2026, 1, 1),
+);
+
+/// The default [CameraSetupWizard.buildEditor] throws before touching its
+/// context, so the test never needs a real one.
+class _NullBuildContext implements BuildContext {
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('not used');
 }

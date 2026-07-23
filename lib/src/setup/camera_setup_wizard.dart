@@ -35,6 +35,15 @@ import '../persistence/camera_profile.dart';
 ///    second call pops a second route. Guard against the widget firing again
 ///    after `dispose`, and against a user double-tapping "Save".
 ///
+/// 3. **[buildEditor] preserves the profile's identity.** The profile it hands
+///    to `onComplete` must keep the incoming [CameraProfile.id],
+///    [CameraProfile.createdAt] and [CameraProfile.isDefault] — build it with
+///    [CameraProfile.copyWith], never [CameraProfile.create]. Minting a fresh id
+///    silently orphans the secret stored under the old one (secrets are keyed by
+///    profile id and there is no way to reach them afterwards) and drops the
+///    user's default-camera choice. This is why editing is a distinct entry
+///    point rather than "run the setup flow again".
+///
 /// Implementations should also **verify connectivity before completing**, so a
 /// persisted profile is known-good rather than a guess the user only discovers
 /// is wrong on the next launch. What that means is backend-specific: a network
@@ -74,4 +83,40 @@ abstract class CameraSetupWizard {
     required ValueChanged<CameraProfile> onComplete,
     required VoidCallback onCancel,
   });
+
+  /// Whether this wizard implements [buildEditor].
+  ///
+  /// Drives whether a saved camera of this backend offers an "Edit" action. It
+  /// is a capability *query*, in the same spirit as `CameraAdapter.capabilities`
+  /// — the UI asks the registered wizard rather than branching on the backend
+  /// type string, so a chooser or a camera list still names no backend.
+  ///
+  /// Defaults to `false`: a backend whose setup is a pure device picker has
+  /// nothing to edit, and one whose setup is a vendor cloud sign-in may not be
+  /// re-enterable field-by-field. Those cases inherit the default and write no
+  /// dead stub (interface segregation, mirroring how `CameraAdapter.setPan`/
+  /// `setTilt` default to throwing [UnsupportedError]).
+  bool get supportsEditing => false;
+
+  /// Re-opens an already-saved [profile] so the user can change its settings.
+  ///
+  /// Only called when [supportsEditing] is `true`. The same two callback
+  /// invariants above apply, plus the identity invariant: the profile passed to
+  /// [onComplete] **must** carry the same [CameraProfile.id],
+  /// [CameraProfile.createdAt] and [CameraProfile.isDefault] as [profile].
+  ///
+  /// An implementation that collects a secret should re-verify connectivity
+  /// before completing, exactly as [build] does — an edit that saves an
+  /// unreachable endpoint is no better than an add that does.
+  Widget buildEditor(
+    BuildContext context, {
+    required CameraProfile profile,
+    required ValueChanged<CameraProfile> onComplete,
+    required VoidCallback onCancel,
+  }) {
+    throw UnsupportedError(
+      '$runtimeType does not support editing a saved camera. '
+      'Check supportsEditing before calling buildEditor.',
+    );
+  }
 }

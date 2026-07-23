@@ -380,6 +380,32 @@ class CameraSession extends ChangeNotifier {
     await switchToProfile(profile);
   }
 
+  /// Persists an edited or renamed camera, re-opening it only if it is the one
+  /// currently live.
+  ///
+  /// [updated] must keep the original [CameraProfile.id] — the store upserts on
+  /// it, and the camera's secrets are keyed by it. A caller that passes a fresh
+  /// id would add a second camera and strand the old one's password (see the
+  /// `CameraSetupWizard.buildEditor` identity invariant).
+  ///
+  /// Editing an *idle* camera deliberately does not switch to it: changing a
+  /// saved setting is not a request to start streaming from it, and yanking the
+  /// live camera away would be a surprise. Editing the *active* one does re-open
+  /// it, since its endpoint or credentials may have just changed underneath the
+  /// open connection.
+  Future<void> updateProfile(CameraProfile updated) async {
+    final store = _profileStore;
+    if (store == null) return;
+    // save() upserts by id and enforces the single-default rule, so an edit
+    // needs no separate update path.
+    await store.save(updated);
+    await loadProfiles();
+    if (_disposed) return;
+    if (_activeProfile?.id == updated.id) {
+      await switchToProfile(updated);
+    }
+  }
+
   /// Deletes a saved camera **and its secrets**, closing it first if it is live.
   Future<void> deleteProfile(String profileId) async {
     final store = _profileStore;

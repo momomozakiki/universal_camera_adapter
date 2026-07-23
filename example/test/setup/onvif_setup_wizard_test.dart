@@ -141,4 +141,77 @@ void main() {
       expect(caught.toString(), isNot(contains('hunter2')));
     });
   });
+
+  group('buildOnvifSetupDraft — editing a saved camera', () {
+    final saved = draft(
+      host: '192.168.0.217',
+      port: '80',
+      username: 'admin',
+      displayName: 'Front door',
+    ).profile.copyWith(isDefault: true);
+
+    OnvifSetupDraft edited({
+      String host = '192.168.0.99',
+      String port = '8000',
+      String username = 'operator',
+      String password = 'newpass',
+      String displayName = 'Back door',
+    }) {
+      return buildOnvifSetupDraft(
+        host: host,
+        port: port,
+        username: username,
+        password: password,
+        displayName: displayName,
+        existing: saved,
+      );
+    }
+
+    test('identity survives: id, createdAt and isDefault are preserved', () {
+      final result = edited().profile;
+      // The whole point: a new id would orphan the secret keyed by the old one
+      // and silently drop the user's default-camera choice.
+      expect(result.id, saved.id);
+      expect(result.createdAt, saved.createdAt);
+      expect(result.isDefault, isTrue);
+      expect(result.backendType, kOnvifAdapterType);
+    });
+
+    test('the edited endpoint and name replace the old ones', () {
+      final result = edited().profile;
+      expect(result.device.metadata['host'], '192.168.0.99');
+      expect(result.device.metadata['port'], 8000);
+      expect(result.device.metadata['username'], 'operator');
+      expect(result.displayName, 'Back door');
+      expect(result.device.name, 'Back door');
+    });
+
+    test('device.id follows the new endpoint', () {
+      // device.id is the endpoint's identity (host:port) and is *meant* to
+      // change; the profile id above is what must not. CameraSession's onvif
+      // matcher keys on metadata host/port, so a restore still resolves.
+      expect(edited().profile.device.id, '192.168.0.99:8000');
+      expect(saved.device.id, '192.168.0.217:80');
+    });
+
+    test('the edited profile still carries no password', () {
+      final result = edited(password: 'topsecret');
+      expect(result.profile.device.metadata.containsKey('password'), isFalse);
+      expect(result.profile.toJson().toString(), isNot(contains('topsecret')));
+      // …while the transient device still does, for the connectivity re-test.
+      expect(result.connectableDevice.metadata['password'], 'topsecret');
+    });
+
+    test('clearing the password yields a null secret to write', () {
+      // The form turns this into setSecret(id, key, '') so the stored password
+      // is actually cleared rather than left behind.
+      expect(edited(password: '').password, isNull);
+    });
+
+    test('editing does not mutate the original profile', () {
+      edited();
+      expect(saved.device.metadata['host'], '192.168.0.217');
+      expect(saved.displayName, 'Front door');
+    });
+  });
 }
