@@ -25,10 +25,19 @@ import '../camera_adapter.dart' show kDefaultCameraTimeout;
 abstract class OnvifPreviewController {
   /// Opens [streamUri] (must already be `rtsp://`) for playback.
   ///
+  /// [username]/[password], when supplied, authenticate the RTSP session
+  /// itself — a separate concern from the ONVIF SOAP auth already performed
+  /// to resolve [streamUri]; many cameras (e.g. EZVIZ) require both.
+  ///
   /// Throws [TimeoutException] if the RTSP handshake doesn't complete within
   /// [timeout] — a camera that never responds (or a spoofed target) must not
   /// hang [ONVIFCameraAdapter.open] forever.
-  Future<void> open(Uri streamUri, {Duration timeout = kDefaultCameraTimeout});
+  Future<void> open(
+    Uri streamUri, {
+    String? username,
+    String? password,
+    Duration timeout = kDefaultCameraTimeout,
+  });
 
   /// Builds the widget that renders the live feed. Only valid after [open]
   /// has completed.
@@ -48,7 +57,12 @@ class RtspPreview implements OnvifPreviewController {
   bool _disposed = false;
 
   @override
-  Future<void> open(Uri streamUri, {Duration timeout = kDefaultCameraTimeout}) async {
+  Future<void> open(
+    Uri streamUri, {
+    String? username,
+    String? password,
+    Duration timeout = kDefaultCameraTimeout,
+  }) async {
     if (streamUri.scheme.toLowerCase() != 'rtsp') {
       throw StateError('RtspPreview only accepts rtsp:// URIs.');
     }
@@ -58,8 +72,26 @@ class RtspPreview implements OnvifPreviewController {
     if (platform is NativePlayer) {
       // Prefer TCP transport — avoids UDP packet loss on flaky camera LANs.
       await platform.setProperty('rtsp-transport', 'tcp').timeout(timeout);
+      // mpv buffers aggressively by default (optimized for on-demand video,
+      // not a live feed), so the displayed frame falls further behind the
+      // live edge the longer playback runs. `low-latency` + disabling the
+      // cache is the documented fix for a live RTSP source; deliberately
+      // NOT using `untimed`/`no-correct-pts` (play back "as fast as
+      // possible") since both are documented to break audio sync, and this
+      // stream carries an AAC audio track.
+      await platform.setProperty('profile', 'low-latency').timeout(timeout);
+      await platform.setProperty('cache', 'no').timeout(timeout);
     }
-    await _player.open(Media(streamUri.toString())).timeout(timeout);
+
+    // The RTSP session has its own auth, separate from the ONVIF SOAP auth
+    // already used to resolve streamUri — embed as URI userinfo (the form
+    // mpv/media_kit's underlying player expects for RTSP credentials).
+    final authenticatedUri = (username != null && password != null)
+        ? streamUri.replace(
+            userInfo: '${Uri.encodeComponent(username)}:${Uri.encodeComponent(password)}',
+          )
+        : streamUri;
+    await _player.open(Media(authenticatedUri.toString())).timeout(timeout);
   }
 
   @override

@@ -34,7 +34,12 @@ class _FakePreview implements OnvifPreviewController {
   Uri? openedUri;
 
   @override
-  Future<void> open(Uri streamUri, {Duration timeout = kDefaultCameraTimeout}) async {
+  Future<void> open(
+    Uri streamUri, {
+    String? username,
+    String? password,
+    Duration timeout = kDefaultCameraTimeout,
+  }) async {
     opened = true;
     openedUri = streamUri;
   }

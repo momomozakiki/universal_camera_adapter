@@ -48,11 +48,20 @@ class _FakeMediaService implements OnvifMediaServiceBase {
 /// A no-native-player fake so adapter tests never touch media_kit.
 class _FakePreviewController implements OnvifPreviewController {
   Uri? openedUri;
+  String? openedUsername;
+  String? openedPassword;
   bool disposed = false;
 
   @override
-  Future<void> open(Uri streamUri, {Duration timeout = kDefaultCameraTimeout}) async {
+  Future<void> open(
+    Uri streamUri, {
+    String? username,
+    String? password,
+    Duration timeout = kDefaultCameraTimeout,
+  }) async {
     openedUri = streamUri;
+    openedUsername = username;
+    openedPassword = password;
   }
 
   @override

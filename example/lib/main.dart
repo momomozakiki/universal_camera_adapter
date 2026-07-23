@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import 'adapter_types.dart';
@@ -23,6 +24,11 @@ CameraAdapterRegistry buildRegistry() {
 }
 
 void main() {
+  // Required once before any media_kit API use (ONVIF's RtspPreview) — see
+  // `lib/src/onvif/rtsp_preview.dart`. Never called anywhere in this app
+  // before now since the ONVIF preview path had no running-app exerciser
+  // until the manual hardware test harness.
+  MediaKit.ensureInitialized();
   runApp(ExampleApp(registry: buildRegistry()));
 }
 

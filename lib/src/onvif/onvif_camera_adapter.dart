@@ -158,7 +158,12 @@ class ONVIFCameraAdapter extends CameraAdapter {
       );
 
       final preview = _previewFactory();
-      await preview.open(streamUri, timeout: timeout);
+      await preview.open(
+        streamUri,
+        username: creds.username,
+        password: creds.password,
+        timeout: timeout,
+      );
       _preview = preview;
 
       _isOpen = true;

@@ -15,6 +15,12 @@ dependencies:
     sdk: flutter
   universal_camera_adapter:
     path: ../
+  # Direct dep needed only for MediaKit.ensureInitialized() at app startup
+  # (main.dart) — required once before any media_kit API use, per its setup
+  # docs. universal_camera_adapter already depends on it transitively for
+  # ONVIF's RtspPreview (lib/src/onvif/rtsp_preview.dart); Dart requires a
+  # direct dependency to import it directly here.
+  media_kit: ^1.2.0
   # Cross-platform (Android + Windows) barcode/QR reader used by the scanner
   # tabs to decode a JPEG from CameraAdapter.captureFrame(). `image` decodes +
   # downsamples the JPEG; flutter_zxing (zxing-cpp) decodes QR and 1D formats.

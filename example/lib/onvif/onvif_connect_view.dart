@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
@@ -23,6 +24,10 @@ class OnvifConnectView extends StatefulWidget {
 class _OnvifConnectViewState extends State<OnvifConnectView> {
   static const _prefsHostKey = 'onvif_tab.host';
   static const _prefsUsernameKey = 'onvif_tab.username';
+  // Plaintext SharedPreferences, matching EzvizSetupWizard's own verification-code
+  // persistence (`ezviz_setup_wizard.dart`'s `_prefsCodeKey`) — same tradeoff,
+  // same kind of value (a device verification code, not an account password).
+  static const _prefsPasswordKey = 'onvif_tab.password';
 
   final _hostController = TextEditingController();
   final _portController = TextEditingController(text: '8000');
@@ -31,6 +36,7 @@ class _OnvifConnectViewState extends State<OnvifConnectView> {
 
   ONVIFCameraAdapter? _adapter;
   bool _busy = false;
+  bool _obscurePassword = true;
   String? _error;
 
   bool get _connected => _adapter?.isOpen ?? false;
@@ -45,10 +51,12 @@ class _OnvifConnectViewState extends State<OnvifConnectView> {
     final prefs = await SharedPreferences.getInstance();
     final host = prefs.getString(_prefsHostKey);
     final username = prefs.getString(_prefsUsernameKey);
+    final password = prefs.getString(_prefsPasswordKey);
     if (!mounted) return;
     setState(() {
       if (host != null) _hostController.text = host;
       if (username != null) _usernameController.text = username;
+      if (password != null) _passwordController.text = password;
     });
   }
 
@@ -73,6 +81,15 @@ class _OnvifConnectViewState extends State<OnvifConnectView> {
     final username = _usernameController.text.trim();
     final password = _passwordController.text;
 
+    if (host.isEmpty) {
+      setState(() => _error = "Enter the camera's IP address.");
+      return;
+    }
+    if (port < 1 || port > 65535) {
+      setState(() => _error = 'Enter a valid port (1-65535).');
+      return;
+    }
+
     setState(() {
       _busy = true;
       _error = null;
@@ -80,6 +97,7 @@ class _OnvifConnectViewState extends State<OnvifConnectView> {
 
     unawaited(_savePref(_prefsHostKey, host));
     unawaited(_savePref(_prefsUsernameKey, username));
+    unawaited(_savePref(_prefsPasswordKey, password));
 
     final adapter = ONVIFCameraAdapter(
       credentials: OnvifCredentials(
@@ -114,6 +132,16 @@ class _OnvifConnectViewState extends State<OnvifConnectView> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _copyError(BuildContext context) async {
+    final error = _error;
+    if (error == null) return;
+    await Clipboard.setData(ClipboardData(text: error));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Error message copied.'), duration: Duration(seconds: 2)),
+    );
   }
 
   Future<void> _disconnect() async {
@@ -156,6 +184,7 @@ class _OnvifConnectViewState extends State<OnvifConnectView> {
             controller: _hostController,
             decoration: const InputDecoration(
               labelText: 'Host / IP address',
+              hintText: '192.168.0.217',
               border: OutlineInputBorder(),
             ),
           ),
@@ -179,19 +208,35 @@ class _OnvifConnectViewState extends State<OnvifConnectView> {
           const SizedBox(height: 12),
           TextField(
             controller: _passwordController,
-            obscureText: true,
-            decoration: const InputDecoration(
+            obscureText: _obscurePassword,
+            decoration: InputDecoration(
               labelText: 'Password / verification code',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+              ),
             ),
           ),
           const SizedBox(height: 16),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
-              child: Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: SelectableText(
+                      _error!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Copy error message',
+                    icon: const Icon(Icons.copy, size: 18),
+                    onPressed: () => _copyError(context),
+                  ),
+                ],
               ),
             ),
           FilledButton(
