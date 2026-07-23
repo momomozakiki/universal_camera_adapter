@@ -27,7 +27,7 @@ export 'src/flutter_camera_adapter.dart' show FlutterCameraAdapter;
 
 // Planned network backend (scaffolding — throws UnimplementedError).
 export 'src/onvif/onvif_camera_adapter.dart'
-    show ONVIFCameraAdapter, OnvifCredentials;
+    show ONVIFCameraAdapter, OnvifCredentials, kDefaultOnvifPort;
 
 // Camera profile + secret persistence (Epic 2.5).
 export 'src/persistence/camera_profile.dart' show CameraProfile;

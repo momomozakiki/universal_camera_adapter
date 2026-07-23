@@ -19,7 +19,10 @@ CameraAdapterRegistry buildRegistry() {
   final registry = CameraAdapterRegistry();
   registry.register(kBuiltinAdapterType, FlutterCameraAdapter.new, asDefault: true);
   registry.register(kEzvizAdapterType, EzvizCameraAdapter.new);
-  // Future: registry.register('onvif', ONVIFCameraAdapter.new);
+  // Zero-arg tear-off: the adapter reads its per-camera host/port/credentials
+  // from `device.metadata` in open(), so one registration serves every ONVIF
+  // camera the user adds, of any brand.
+  registry.register(kOnvifAdapterType, ONVIFCameraAdapter.new);
   return registry;
 }
 

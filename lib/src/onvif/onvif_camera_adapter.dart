@@ -23,6 +23,13 @@ typedef OnvifMediaServiceFactory = OnvifMediaServiceBase Function({
   required OnvifHttpClient httpClient,
 });
 
+/// Port assumed for an ONVIF device service when none is configured.
+///
+/// ONVIF rides on plain HTTP, so `80` is the conventional default. Devices that
+/// expose the service elsewhere (EZVIZ commonly uses `8000`) must say so via
+/// `port`.
+const int kDefaultOnvifPort = 80;
+
 /// Credentials + endpoint for an ONVIF camera.
 ///
 /// **Secrets come from runtime config, never code** (see the `input-hardening`
@@ -31,10 +38,132 @@ typedef OnvifMediaServiceFactory = OnvifMediaServiceBase Function({
 class OnvifCredentials {
   const OnvifCredentials({
     required this.host,
-    this.port = 80,
+    this.port = kDefaultOnvifPort,
     this.username,
     this.password,
   });
+
+  /// Builds credentials from a [CameraDevice.metadata] map.
+  ///
+  /// Keys are the **brand-neutral ONVIF vocabulary** — `host`, `port`,
+  /// `username`, `password` — so any ONVIF-compliant camera (Hikvision, Dahua,
+  /// Reolink, Axis, EZVIZ, …) is configured the same way; that interoperability
+  /// is the entire point of the standard. Brand-specific extras may ride in the
+  /// same map under their own keys and are ignored here. `port` defaults to
+  /// [kDefaultOnvifPort] when absent.
+  ///
+  /// This is how a registry-created adapter receives per-camera configuration:
+  /// a `CameraProfile` persists the non-secret `host`/`port`/`username` in
+  /// `device.metadata`, and the session merges the secret in from
+  /// `CameraSecretStore` just before [ONVIFCameraAdapter.open]. Many cameras of
+  /// mixed brands can therefore be connected at once — one profile and one
+  /// adapter instance each.
+  ///
+  /// **The map is untrusted input** (`input-hardening` Rule 1): it round-trips
+  /// through persisted JSON, so every field is type-checked with `is!` before it
+  /// is read — never a bare `as`, which would turn a hand-edited preferences
+  /// file into an uncaught `TypeError`. All problems are collected and reported
+  /// together instead of failing on the first one.
+  ///
+  /// Throws [FormatException] when a key is present but malformed (wrong type,
+  /// unparseable or out-of-range port, blank or over-long host), and
+  /// [StateError] when `host` is simply absent — matching the adapter's typed
+  /// error surface. Never leaks a raw `TypeError`.
+  ///
+  /// Problem messages name the offending key and its runtime type, **never its
+  /// value**, so a malformed-password error cannot echo the password.
+  factory OnvifCredentials.fromMetadata(Map<String, dynamic> metadata) {
+    final problems = <String>[];
+
+    // --- host: required, non-blank, length-capped ---
+    final rawHost = metadata['host'];
+    String? host;
+    if (rawHost == null) {
+      // Absent is a *missing config* case, not a malformed one — it maps to
+      // StateError below, after any malformed sibling keys are reported.
+    } else if (rawHost is! String) {
+      problems.add("'host' must be a String (got ${rawHost.runtimeType})");
+    } else if (rawHost.trim().isEmpty) {
+      problems.add("'host' must not be blank");
+    } else if (rawHost.length > _maxHostLength) {
+      // Bounded before it ever reaches a URI builder or the network stack.
+      problems.add("'host' exceeds $_maxHostLength characters");
+    } else {
+      host = rawHost.trim();
+    }
+
+    // --- port: optional; int or a numeric String; must be a valid TCP port ---
+    var port = kDefaultOnvifPort;
+    final rawPort = metadata['port'];
+    if (rawPort != null) {
+      int? parsed;
+      if (rawPort is int) {
+        parsed = rawPort;
+      } else if (rawPort is String) {
+        // JSON round-trips and text fields both produce Strings here.
+        parsed = int.tryParse(rawPort.trim());
+        if (parsed == null) {
+          problems.add("'port' is not a number");
+        }
+      } else {
+        problems.add("'port' must be an int or a numeric String "
+            '(got ${rawPort.runtimeType})');
+      }
+      if (parsed != null) {
+        if (parsed < _minPort || parsed > _maxPort) {
+          problems.add("'port' must be between $_minPort and $_maxPort");
+        } else {
+          port = parsed;
+        }
+      }
+    }
+
+    final username = _optionalString(metadata, 'username', problems);
+    final password = _optionalString(metadata, 'password', problems);
+
+    if (problems.isNotEmpty) {
+      throw FormatException(
+        'Malformed ONVIF connection metadata: ${problems.join('; ')}.',
+      );
+    }
+    if (host == null) {
+      throw StateError(
+        'ONVIF connection metadata has no "host" entry. Either pass '
+        'OnvifCredentials to the ONVIFCameraAdapter constructor, or set '
+        'device.metadata["host"] on the CameraDevice passed to open().',
+      );
+    }
+
+    return OnvifCredentials(
+      host: host,
+      port: port,
+      username: username,
+      password: password,
+    );
+  }
+
+  /// Reads an optional `String` field, recording a problem for a wrong type.
+  /// An empty string is normalized to `null` (an unset field, not a blank one).
+  static String? _optionalString(
+    Map<String, dynamic> metadata,
+    String key,
+    List<String> problems,
+  ) {
+    final raw = metadata[key];
+    if (raw == null) return null;
+    if (raw is! String) {
+      // Report the type only — `raw` may be a secret.
+      problems.add("'$key' must be a String (got ${raw.runtimeType})");
+      return null;
+    }
+    return raw.isEmpty ? null : raw;
+  }
+
+  /// Longest accepted [host]; a fully-qualified domain name maxes out at 253
+  /// octets, so anything beyond this is malformed rather than merely unusual.
+  static const int _maxHostLength = 255;
+  static const int _minPort = 1;
+  static const int _maxPort = 65535;
 
   final String host;
   final int port;
@@ -76,8 +205,14 @@ class ONVIFCameraAdapter extends CameraAdapter {
         _mediaServiceFactory = mediaServiceFactory ?? OnvifMediaService.new,
         _previewFactory = previewFactory ?? RtspPreview.new;
 
-  /// Connection details. When constructed via a zero-arg factory (registry
-  /// tear-off), this is `null` and must be supplied before [open].
+  /// Connection details supplied at construction, for callers that build the
+  /// adapter directly.
+  ///
+  /// `null` when constructed via a zero-arg factory (a registry tear-off) —
+  /// which is the normal path. In that case [open] reads the connection details
+  /// from `device.metadata` via [OnvifCredentials.fromMetadata], so setup flows
+  /// through `open(device)` exactly like every other backend. When both are
+  /// present, this field wins.
   final OnvifCredentials? credentials;
 
   /// When true (and no [httpClientFactory] override is supplied), the
@@ -115,10 +250,15 @@ class ONVIFCameraAdapter extends CameraAdapter {
 
   @override
   Future<void> open(CameraDevice device, {Duration timeout = kDefaultCameraTimeout}) async {
-    final creds = credentials;
-    if (creds == null) {
-      throw StateError('ONVIFCameraAdapter.credentials must be supplied before open().');
-    }
+    // Constructor-supplied credentials win; otherwise read them off the device
+    // being opened. This is what lets a registry-created instance connect at
+    // all — see [credentials].
+    //
+    // SECURITY: never log `device.metadata` from here. The caller merges the
+    // secret into a transient copy of the device just before open(), so at this
+    // point the map carries the plaintext password. Log `creds` instead —
+    // [OnvifCredentials.toString] redacts it.
+    final creds = credentials ?? OnvifCredentials.fromMetadata(device.metadata);
 
     final token = (creds.username != null && creds.password != null)
         ? _soap.wsUsernameToken(creds.username!, creds.password!)
