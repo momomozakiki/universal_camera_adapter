@@ -134,6 +134,31 @@ flutter test
 No live-hardware tests run in CI. Integration against a real Android device or Windows webcam is
 manual — see [`example/`](example/).
 
+## Building on Windows
+
+Building for Windows needs **Visual Studio 2022** (or Build Tools 2022) with the **Desktop
+development with C++** workload *and* the **C++ ATL** individual component. ATL is not part of the
+default C++ workload, and `flutter doctor` reports the toolchain as healthy without it — the failure
+only appears at the native compile step:
+
+```
+flutter_secure_storage_windows_plugin.cpp(6,10): fatal error C1083:
+Cannot open include file: 'atlstr.h': No such file or directory
+```
+
+`flutter_secure_storage` (the default `CameraSecretStore` backend) needs ATL to talk to the Windows
+Credential Manager. Add it via **Visual Studio Installer → Modify → Individual components →** search
+`ATL` **→ C++ ATL for latest v143 build tools (x86 & x64)**.
+
+Two related gotchas:
+
+- Flutter always selects the **newest** Visual Studio install it can find and offers no override. A
+  half-finished VS 2022 alongside a working VS 2019 will be chosen and then fail with *"The current
+  Visual Studio installation is incomplete."* Either complete it or remove it.
+- After switching VS versions, run `flutter clean`. The generated `CMakeCache.txt` pins the
+  generator, so a stale cache fails with *"generator: Visual Studio 17 2022 does not match the
+  generator used previously: Visual Studio 16 2019."*
+
 ## Backends
 
 | Backend | Purpose | Platforms | Status |

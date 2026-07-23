@@ -1,7 +1,7 @@
 ---
 title: Camera Feature Matrix Model
-version: 1.0
-last_validated: 2026-07-22
+version: 1.1
+last_validated: 2026-07-23
 official: false
 source: project-internal
 tags: [features, capabilities, matrix, ptz, zoom, ocr, qr, barcode]
@@ -16,6 +16,7 @@ applies_when: "Building a UI to display/query camera capabilities or implementin
 | Version | Date       | Change   |
 |---------|------------|----------|
 | 1.0     | 2026-07-22 | Initial. |
+| 1.1     | 2026-07-23 | Implemented in Epic 2.5 Phase A (`8a390ee`). Recorded the actual derivation direction (matrix derived *from* `CameraCapabilities`, for backward compatibility) and the future `frameStream` throughput ceiling for scanning. |
 
 ## Problem with today's `CameraCapabilities`
 
@@ -166,21 +167,59 @@ A camera can have `zoom: supported` while `pan` and `tilt` are `unsupported`—a
 member of the PTZ bundle. Adding a new bundle later (e.g., `'audio': {twoWayAudio}`) is a one-line
 addition; existing backends' matrices need no change (Open/Closed).
 
-## Migration: `CameraCapabilities` stays, becomes derived view
+## Migration: `featureMatrix` is derived *from* `CameraCapabilities`
 
-**`CameraAdapter.capabilities` stays unchanged.** Existing consumers reading `capabilities.hasZoom`
-never break. The class is recomputed from the new `featureMatrix` on demand:
+> **Corrected in v1.1 (as-built).** The v1.0 draft of this section proposed the reverse — making
+> `capabilities` a derived view recomputed from `featureMatrix`. The shipped implementation
+> (`8a390ee`) deliberately went the **other** direction, because re-basing `capabilities` on the
+> matrix would have meant editing every existing backend in lockstep. The text below describes what
+> is actually in `lib/src/camera_adapter.dart`.
+
+**`CameraCapabilities` remains the primary post-open struct, unchanged.** Nothing that reads
+`capabilities.hasZoom` had to change — that is what makes this backward compatible. `featureMatrix`
+is added as a **concrete** getter on the base `CameraAdapter` that *derives* the matrix from
+`capabilities` plus static defaults:
 
 ```dart
-extension CameraAdapterMigration on CameraAdapter {
-  /// New in v1.2. Returns the feature matrix for this device.
-  CameraFeatureMatrix get featureMatrix => _computeFeatureMatrix();
-  
-  /// Existing behavior, kept for backward compatibility.
-  /// Computed from featureMatrix.
-  CameraCapabilities get capabilities => _deriveCapabilitiesFromMatrix();
+// lib/src/camera_adapter.dart — concrete, not abstract.
+CameraFeatureMatrix get featureMatrix {
+  final caps = capabilities; // throws StateError if not open — intentional.
+  return CameraFeatureMatrix.fromStatuses(<CameraFeature, CameraFeatureStatus>{
+    CameraFeature.zoom: caps.hasZoom ? supported : unsupported,
+    CameraFeature.pan:  caps.hasPan  ? supported : unsupported,
+    CameraFeature.tilt: caps.hasTilt ? supported : unsupported,
+    CameraFeature.frameCapture: supported,   // required contract method
+    CameraFeature.qrScanning: supported,     // follows from frameCapture
+    CameraFeature.barcodeScanning: supported,
+    CameraFeature.textRecognitionOcr: unvalidated,
+    CameraFeature.twoWayAudio: unvalidated,
+    CameraFeature.motionEvents: unvalidated,
+  });
 }
 ```
+
+**Why concrete rather than abstract — the Open/Closed win.** Adding an app-level feature is one enum
+value plus one line in this mapping, with **no per-adapter change**. Making `featureMatrix` a
+*required* getter would have forced a lockstep edit across every backend on every new feature, which
+is precisely the problem this model exists to remove.
+
+Backends override `featureMatrix` **only where reality differs**:
+
+| Backend | Override? | Why |
+| :--- | :--- | :--- |
+| `FlutterCameraAdapter` | No | The base derivation is already correct. |
+| `ONVIFCameraAdapter` | **Must** | Its `capabilities` getter still throws `UnimplementedError`, so the base getter cannot read it. Returns an explicit all-`unsupported`/`unvalidated` matrix, gated on `isOpen`. |
+| `EzvizCameraAdapter` | Yes | Reuses `super.featureMatrix.withStatuses({...})` to downgrade `frameCapture`/scanning to `unvalidated` (the vendored `capturePicture` is still a stub). |
+
+**The base defaults are deliberately optimistic.** `frameCapture` is reported `supported` because it
+is a required contract method, and scanning follows from it. Any backend whose `captureFrame()` is
+not actually wired — i.e. throws — **must** override to downgrade `frameCapture` and the scanning
+features, or it inherits a false positive. This is stated in the getter's doc-comment so future
+adapter authors hit it at the point of use.
+
+**Naming trap, recorded so it isn't reintroduced:** the matrix copy helper is `withStatuses(...)`,
+**not** `override(...)`. A method named `override` shadows the `@override` annotation inside the same
+class, silently breaking `==`, `hashCode`, and `toString`.
 
 New consumers wanting bundles or tri-state read `featureMatrix` directly. Existing consumers read
 `capabilities` as before, with no code changes.
@@ -208,7 +247,12 @@ motionEvents     → unvalidated (placeholder for future)
 
 ### `ONVIFCameraAdapter` (IP cameras)
 
-Currently scaffolding (all throw `UnimplementedError`). At v1.1 implementation time:
+**No longer all scaffolding** (this line said so at v1.0): `open()`/`close()`/`isOpen`/`buildPreview()`
+are real and verified against hardware, while `listDevices()`, `capabilities`, `captureFrame()`, and
+PTZ still throw `UnimplementedError`. Because `capabilities` throws, this backend **cannot** use the
+base derivation and ships an explicit matrix instead — see the override table above. **As shipped
+today** everything is `unsupported`/`unvalidated`. The target state, once the remaining Epic 2 items
+land:
 
 ```
 zoom             → supported (once AbsoluteMove with zoom is proven live)
@@ -283,6 +327,24 @@ OCR packages (Interface Segregation) — a backend that can't produce frames sim
 A backend that needs smart frame selection (e.g., "wait for good lighting before encoding the QR
 frame") can optimize within its own `captureFrame()` implementation, but the scanning logic itself
 lives in the app.
+
+### Throughput ceiling — a future `frameStream` (out of scope for Epic 2.5)
+
+The polling model above **works today** — the example app's QR and 1D-barcode tabs decode live via
+repeated `captureFrame()` calls (Epic 1, shipped). What it cannot do is *sustain* a high frame rate:
+each call re-captures and re-encodes a full frame, costing tens of milliseconds, so the achievable
+decode rate is well under video frame rate.
+
+If real-time (~30 fps) scanning is ever required, the fix is an **additive** contract extension —
+a `Stream<Uint8List> frameStream` (or a typed `VideoFrame` equivalent) on `CameraAdapter`, letting a
+decoder consume frames as the pipeline produces them instead of paying capture+encode per attempt.
+Deliberately **not** part of Epic 2.5.
+
+This model needs no change to accommodate it. `qrScanning`/`barcodeScanning`/`textRecognitionOcr`
+already carry a tri-state status and are gated behind `frameCapture`; a backend that gains a frame
+stream simply reports them `supported`, and one that lacks it keeps reporting `unvalidated`. Recorded
+here so the limitation is a known design boundary rather than a surprise discovered during scanner
+performance work.
 
 ## Risks and open questions
 
