@@ -338,7 +338,13 @@ class _OnvifSetupFormState extends State<_OnvifSetupForm> {
     } on TimeoutException {
       _fail('The camera did not respond in time. Check the host and port.');
     } on Object catch (e) {
-      _fail('$e');
+      // Unclassified: report the *type*, never the value. The typed errors above
+      // are known-redacted (`OnvifCredentials.toString` hides the password, and
+      // the HTTP client never echoes it), but this branch catches whatever the
+      // socket/HTTP stack throws — and in edit mode it runs with a real stored
+      // password in play, so a future stack that put a credential in a URI or
+      // header message would leak it straight into the UI.
+      _fail('The camera could not be reached (${e.runtimeType}).');
     } finally {
       if (mounted) {
         setState(() {

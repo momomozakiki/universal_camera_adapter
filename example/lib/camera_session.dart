@@ -136,6 +136,31 @@ class CameraSession extends ChangeNotifier {
   bool supports(CameraFeature feature) =>
       featureMatrix?.isSupported(feature) ?? false;
 
+  /// Whether a zoom control should be interactive.
+  ///
+  /// Both halves are required and neither implies the other: the matrix answers
+  /// "may I?" uniformly across backends, while [capabilities] is the only source
+  /// of the numeric range — and it can be absent even on an open camera. A
+  /// backend that reports zoom supported but exposes no range has nothing to
+  /// drive a slider with.
+  bool get zoomEnabled =>
+      capabilities != null && supports(CameraFeature.zoom);
+
+  /// The min/max a zoom slider should span, falling back to a neutral 1.0–1.0
+  /// when the backend reports no range. Pair with [zoomEnabled], which is what
+  /// decides whether the control is live.
+  ///
+  /// Derived state belongs here rather than in each tab: `PreviewTab` and
+  /// `PtzTab` both need it, and two copies of a fallback are two places to get
+  /// it wrong.
+  ({double min, double max}) get zoomRange {
+    final caps = capabilities;
+    return (
+      min: caps?.minZoomLevel ?? _defaultZoom,
+      max: caps?.maxZoomLevel ?? _defaultZoom,
+    );
+  }
+
   CameraDevice? get selectedDevice => _deviceById(_selectedId);
 
   Future<void> _opQueue = Future<void>.value();

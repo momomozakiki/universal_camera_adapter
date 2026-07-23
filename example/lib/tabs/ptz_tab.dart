@@ -51,23 +51,19 @@ class _PtzTabState extends State<PtzTab> {
             message: 'Connect a camera to test PTZ controls.',
           );
         }
-        // Range only — the enable/disable decision below comes from the matrix.
-        // Nullable: a backend may implement the matrix without the legacy
-        // capabilities struct, in which case there is no range to offer and the
-        // zoom slider is simply disabled.
-        final caps = session.capabilities;
-        final minZoom = caps?.minZoomLevel ?? 1.0;
-        final maxZoom = caps?.maxZoomLevel ?? 1.0;
+        // Both derived once on the session, so this tab and PreviewTab cannot
+        // disagree about the range or the gate.
+        final zoomRange = session.zoomRange;
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
             _CapabilitySlider(
               label: 'Zoom',
-              enabled: caps != null && session.supports(CameraFeature.zoom),
-              value: session.zoom.clamp(minZoom, maxZoom),
-              min: minZoom,
-              max: maxZoom,
-              unsupportedNote: caps == null
+              enabled: session.zoomEnabled,
+              value: session.zoom.clamp(zoomRange.min, zoomRange.max),
+              min: zoomRange.min,
+              max: zoomRange.max,
+              unsupportedNote: session.capabilities == null
                   ? 'This camera does not report a zoom range.'
                   : 'This camera reports no zoom range.',
               onChanged: session.setZoom,

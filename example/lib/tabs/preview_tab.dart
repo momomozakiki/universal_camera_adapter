@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import '../camera_session.dart';
 
@@ -19,15 +18,13 @@ class PreviewTab extends StatelessWidget {
         final theme = Theme.of(context);
         // Enablement comes from the feature matrix (uniform across every
         // backend); the numeric *range* comes from capabilities, the only place
-        // it exists. Capabilities may legitimately be **absent** — a backend can
-        // implement the matrix without the legacy struct (ONVIF today) — so the
-        // preview never depends on it, and only the zoom slider degrades.
-        final caps = session.capabilities;
-        final zoomEnabled =
-            caps != null && session.supports(CameraFeature.zoom);
-        // Never assumed — a phone may report min == max.
-        final minZoom = caps?.minZoomLevel ?? 1.0;
-        final maxZoom = caps?.maxZoomLevel ?? 1.0;
+        // it exists. Both are derived once on the session so this tab and PtzTab
+        // cannot disagree. Capabilities may legitimately be **absent** — a
+        // backend can implement the matrix without the legacy struct (ONVIF
+        // today) — so the preview never depends on it, and only the zoom slider
+        // degrades. Never assumed: a phone may report min == max.
+        final zoomEnabled = session.zoomEnabled;
+        final zoomRange = session.zoomRange;
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -89,14 +86,14 @@ class PreviewTab extends StatelessWidget {
                 const SizedBox(height: 16),
                 Text('Zoom', style: theme.textTheme.titleSmall),
                 Slider(
-                  value: session.zoom.clamp(minZoom, maxZoom),
-                  min: minZoom,
-                  max: maxZoom,
+                  value: session.zoom.clamp(zoomRange.min, zoomRange.max),
+                  min: zoomRange.min,
+                  max: zoomRange.max,
                   onChanged: zoomEnabled ? session.setZoom : null,
                 ),
                 if (!zoomEnabled)
                   Text(
-                    caps == null
+                    session.capabilities == null
                         ? 'This camera does not report a zoom range.'
                         : 'This camera reports no zoom range.',
                     style: theme.textTheme.bodySmall,
