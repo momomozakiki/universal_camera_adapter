@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import '../camera_session.dart';
 import '../scanning/barcode_decoder.dart';
@@ -72,9 +73,18 @@ class _ScannerTabState extends State<ScannerTab> {
     _syncScanner();
   }
 
-  /// Runs the scanner iff this tab is visible AND a camera is open.
+  /// Runs the scanner iff this tab is visible, a camera is open, **and** that
+  /// camera can actually deliver frames.
+  ///
+  /// The frameCapture gate matters because scanning is built entirely on the
+  /// generic `captureFrame()` primitive: a backend whose capture is not wired
+  /// (EZVIZ today, pending the native `capturePicture` patch) reports
+  /// `unvalidated`, and without this check the loop would fail once per frame
+  /// instead of saying "not supported" once.
   void _syncScanner() {
-    final shouldRun = widget.active && widget.session.isOpen;
+    final shouldRun = widget.active &&
+        widget.session.isOpen &&
+        widget.session.supports(CameraFeature.frameCapture);
     if (shouldRun && !_scanner.isRunning) {
       _error = null;
       _scanner.start();
@@ -111,6 +121,31 @@ class _ScannerTabState extends State<ScannerTab> {
         session: session,
         icon: widget.icon,
         message: 'Connect a camera to scan a ${widget.subject}.',
+      );
+    }
+    if (!session.supports(CameraFeature.frameCapture)) {
+      // Degrade to a clear "not supported" rather than a stream of per-frame
+      // errors — the whole point of querying support instead of assuming it.
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                widget.icon,
+                size: 48,
+                color: Theme.of(context).colorScheme.outline,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'This camera cannot capture still frames yet, so '
+                '${widget.subject} scanning is unavailable for it.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
       );
     }
     return Column(

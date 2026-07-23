@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
+import 'adapter_types.dart';
+
 /// The single shared camera lifecycle for the whole example app.
 ///
 /// The [CameraAdapter] contract allows **at most one open device per adapter**
@@ -33,15 +35,45 @@ import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 /// the queue reaches it. (Idiom ported from odb_library's
 /// `CameraPage._serialized`.)
 class CameraSession extends ChangeNotifier {
-  CameraSession(this._registry)
-      : _adapter = _registry.createDefault(),
-        _adapterType = _registry.defaultType!;
+  CameraSession(
+    this._registry, {
+    CameraProfileStore? profileStore,
+    CameraSecretStore? secretStore,
+  })  : _adapter = _registry.createDefault(),
+        _adapterType = _registry.defaultType!,
+        _profileStore = profileStore,
+        _secretStore = secretStore;
 
   final CameraAdapterRegistry _registry;
+
+  /// Both optional: a consumer that never saves a camera (and every existing
+  /// test) constructs `CameraSession(registry)` and gets the original
+  /// live-discovery-only behaviour.
+  final CameraProfileStore? _profileStore;
+  final CameraSecretStore? _secretStore;
+
   CameraAdapter _adapter;
 
   String _adapterType;
   String get adapterType => _adapterType;
+
+  List<CameraProfile> _profiles = const <CameraProfile>[];
+
+  /// Saved cameras, most recently created first. Empty until [loadProfiles].
+  List<CameraProfile> get profiles => _profiles;
+
+  CameraProfile? _activeProfile;
+
+  /// The saved camera currently driving the session, if any. `null` when the
+  /// open device came from live discovery rather than a profile.
+  CameraProfile? get activeProfile => _activeProfile;
+
+  final Set<String> _unavailableProfileIds = <String>{};
+
+  /// Profile ids that did not match any device the backend could enumerate, so
+  /// were not opened. The Cameras tab greys these out. See [_findMatchingDevice].
+  Set<String> get unavailableProfileIds =>
+      Set<String>.unmodifiable(_unavailableProfileIds);
 
   List<CameraDevice> _devices = const <CameraDevice>[];
   List<CameraDevice> get devices => _devices;
@@ -64,8 +96,24 @@ class CameraSession extends ChangeNotifier {
 
   /// Capabilities of the *open* device, or null when nothing is open (reading
   /// [CameraAdapter.capabilities] before open throws by contract).
+  ///
+  /// Still the source of numeric detail — zoom min/max. For "is this feature
+  /// available at all?", prefer [featureMatrix].
   CameraCapabilities? get capabilities =>
       _adapter.isOpen ? _adapter.capabilities : null;
+
+  /// Feature support of the *open* device, or null when nothing is open.
+  ///
+  /// This is what feature UI should gate on: it is uniform across every
+  /// backend and degrades to "not supported" rather than requiring the caller
+  /// to know which backend is live.
+  CameraFeatureMatrix? get featureMatrix =>
+      _adapter.isOpen ? _adapter.featureMatrix : null;
+
+  /// Whether the open device supports [feature]. `false` when nothing is open,
+  /// so callers can gate without a null check.
+  bool supports(CameraFeature feature) =>
+      featureMatrix?.isSupported(feature) ?? false;
 
   CameraDevice? get selectedDevice => _deviceById(_selectedId);
 
@@ -125,6 +173,216 @@ class CameraSession extends ChangeNotifier {
     await refreshDevices();
   }
 
+  // --- Saved cameras (CameraProfile) ---
+
+  /// How a saved profile is matched back to a live device, keyed by backend.
+  ///
+  /// A table rather than a `switch`: a new backend adds a row (or relies on the
+  /// id fallback) instead of editing a conditional. This is the **only**
+  /// type-keyed construct in the app, and it is identity resolution, not
+  /// feature logic — `camera-adapter-authoring` §6 forbids type-branching in
+  /// *feature* code, which this is not. Feature code uses [featureMatrix].
+  ///
+  /// Matching on [CameraDevice.id] alone is wrong in general: `camera_profile.dart`
+  /// documents that id as ephemeral (a USB index, a discovery-time handle), so a
+  /// camera that re-enumerated in a different order would look "gone" while
+  /// sitting right there.
+  static final Map<String, bool Function(CameraProfile, CameraDevice)>
+      _profileMatchers = <String, bool Function(CameraProfile, CameraDevice)>{
+    // Stable per machine — the camera plugin's own index/name.
+    'builtin': _matchesById,
+    // Stable — the EZVIZ cloud serial, e.g. BK0381480.
+    'ezviz': _matchesById,
+    // The endpoint *is* the identity; an ONVIF id can be a URN that changes
+    // across reboots while host/port stay put.
+    'onvif': (profile, device) {
+      final host = profile.device.metadata['host'];
+      if (host == null) return _matchesById(profile, device);
+      return device.metadata['host'] == host &&
+          device.metadata['port'] == profile.device.metadata['port'];
+    },
+  };
+
+  static bool _matchesById(CameraProfile profile, CameraDevice device) =>
+      device.id == profile.device.id;
+
+  /// Loads saved profiles into [profiles]. No-op without a profile store.
+  Future<void> loadProfiles() async {
+    final store = _profileStore;
+    if (store == null) return;
+    final loaded = await store.loadAll();
+    if (_disposed) return;
+    _update(() => _profiles = loaded);
+  }
+
+  /// Loads saved cameras and opens the default one, falling back to live
+  /// discovery when there is nothing saved.
+  ///
+  /// Call once at startup in place of [refreshDevices]. An empty store never
+  /// fabricates a profile — it simply behaves as the app did before profiles
+  /// existed, yielding a transient selection only.
+  Future<void> restore() async {
+    await loadProfiles();
+    if (_disposed) return;
+
+    final target = _defaultProfile();
+    if (target == null) {
+      await refreshDevices();
+      return;
+    }
+    await switchToProfile(target);
+    if (_activeProfile == null && !_adapter.isOpen) {
+      // The restore didn't take (device gone, camera unreachable). Fall back so
+      // the user still has a working app rather than an empty screen.
+      await refreshDevices();
+    }
+  }
+
+  CameraProfile? _defaultProfile() {
+    if (_profiles.isEmpty) return null;
+    for (final profile in _profiles) {
+      if (profile.isDefault) return profile;
+    }
+    // No explicit default — most recently created wins.
+    return _profiles.reduce(
+      (a, b) => b.createdAt.isAfter(a.createdAt) ? b : a,
+    );
+  }
+
+  /// Opens a saved camera: fetches its secret, merges it into a **transient**
+  /// copy of the device, and opens that through the profile's backend.
+  ///
+  /// The merged copy is never stored — [selectedDevice] and the persisted
+  /// profile both keep the secret-free device. That transient merge is how a
+  /// credential reaches an adapter without the `CameraAdapter` contract ever
+  /// growing a credential parameter.
+  Future<void> switchToProfile(CameraProfile profile) async {
+    _update(() {
+      _busy = true;
+      _error = null;
+      _unavailableProfileIds.remove(profile.id);
+    });
+
+    if (profile.backendType != _adapterType) {
+      try {
+        await _serialized(_adapter.close);
+      } on Object catch (_) {
+        // The outgoing adapter is being discarded regardless.
+      }
+      if (_disposed) return;
+      _update(() {
+        _adapter = _registry.create(profile.backendType);
+        _adapterType = profile.backendType;
+        _devices = const <CameraDevice>[];
+        _selectedId = null;
+        _zoom = 1;
+      });
+    }
+
+    // Re-validate against live discovery where the backend can enumerate.
+    final device = await _resolveProfileDevice(profile);
+    if (_disposed) return;
+    if (device == null) {
+      _update(() {
+        _busy = false;
+        _activeProfile = null;
+        _unavailableProfileIds.add(profile.id);
+        _error = '${profile.displayName} was not found. '
+            'Reconnect it, or remove the saved camera.';
+      });
+      return;
+    }
+
+    final connectable = await _withSecret(profile, device);
+    if (_disposed) return;
+    _update(() => _activeProfile = profile);
+    await openDevice(connectable, remember: device);
+    if (_disposed) return;
+    if (!_adapter.isOpen) {
+      _update(() => _activeProfile = null);
+    }
+  }
+
+  /// Resolves the live [CameraDevice] for [profile], or null when the backend
+  /// can enumerate and the camera is no longer there.
+  Future<CameraDevice?> _resolveProfileDevice(CameraProfile profile) async {
+    final List<CameraDevice> devices;
+    try {
+      devices = await _serialized(() => _adapter.listDevices());
+    } on UnimplementedError {
+      // The backend cannot enumerate at all (ONVIF today — WS-Discovery is
+      // deferred). Duck-typed on the contract rather than checking the backend
+      // name, so an ONVIF backend that later gains discovery starts being
+      // re-validated with no change here. open() is then the validation: it
+      // does a real round-trip and fails with the usual typed errors.
+      return profile.device;
+    } on Object {
+      // Enumeration failed for some other reason (permissions, transient). Try
+      // the saved device rather than declaring the camera gone.
+      return profile.device;
+    }
+    if (_disposed) return null;
+    _update(() => _devices = devices);
+
+    final matcher = _profileMatchers[profile.backendType] ?? _matchesById;
+    for (final device in devices) {
+      if (matcher(profile, device)) return device;
+    }
+    return null;
+  }
+
+  /// Merges the profile's stored secret into a throwaway copy of [device].
+  Future<CameraDevice> _withSecret(
+    CameraProfile profile,
+    CameraDevice device,
+  ) async {
+    final store = _secretStore;
+    if (store == null) return device;
+    final merged = <String, dynamic>{...device.metadata};
+    for (final key in kCameraSecretKeys) {
+      final secret = await store.getSecret(profile.id, key);
+      if (secret != null && secret.isNotEmpty) merged[key] = secret;
+    }
+    return merged.length == device.metadata.length
+        ? device
+        : device.copyWith(metadata: merged);
+  }
+
+  /// Saves [profile] and immediately switches to it.
+  Future<void> saveAndSwitchTo(CameraProfile profile) async {
+    final store = _profileStore;
+    if (store != null) {
+      await store.save(profile);
+      await loadProfiles();
+    }
+    if (_disposed) return;
+    await switchToProfile(profile);
+  }
+
+  /// Deletes a saved camera **and its secrets**, closing it first if it is live.
+  Future<void> deleteProfile(String profileId) async {
+    final store = _profileStore;
+    if (store == null) return;
+    if (_activeProfile?.id == profileId) {
+      await close();
+      _update(() => _activeProfile = null);
+    }
+    // Secrets first: a profile removed while its secrets survive would leave
+    // them unreachable and undeletable, since they are keyed by its id.
+    await _secretStore?.deleteSecretsForProfile(profileId);
+    await store.delete(profileId);
+    _unavailableProfileIds.remove(profileId);
+    await loadProfiles();
+  }
+
+  /// Marks [profileId] as the camera to restore at next launch.
+  Future<void> setDefaultProfile(String profileId) async {
+    final store = _profileStore;
+    if (store == null) return;
+    await store.setDefault(profileId);
+    await loadProfiles();
+  }
+
   /// Lists devices without opening anything. Drops back to disconnected if the
   /// open device vanished from the refreshed list, and auto-selects the first
   /// device when nothing valid is selected.
@@ -178,15 +436,22 @@ class CameraSession extends ChangeNotifier {
   /// comment) — which [refreshDevices] has no way to know about. [device]
   /// replaces the matching entry in [devices] (by id), or is appended if new,
   /// so later plain [open] calls (e.g. from a device dropdown) keep using it.
-  Future<void> openDevice(CameraDevice device) async {
+  /// [remember] overrides what is stored in [devices], for when the device
+  /// being opened carries a secret that must not be retained. `switchToProfile`
+  /// passes the secret-free original here while opening the merged copy, so the
+  /// credential exists only for the duration of the `open` call and never sits
+  /// in session state where a later plain [open] could reuse or a debug dump
+  /// could expose it.
+  Future<void> openDevice(CameraDevice device, {CameraDevice? remember}) async {
+    final stored = remember ?? device;
     _update(() {
-      final idx = _devices.indexWhere((d) => d.id == device.id);
+      final idx = _devices.indexWhere((d) => d.id == stored.id);
       _devices = idx >= 0
           ? [
               for (var i = 0; i < _devices.length; i++)
-                i == idx ? device : _devices[i],
+                i == idx ? stored : _devices[i],
             ]
-          : [..._devices, device];
+          : [..._devices, stored];
     });
     await _open(device);
   }

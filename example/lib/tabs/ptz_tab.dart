@@ -1,14 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import '../camera_session.dart';
 import '../widgets/no_camera.dart';
 
-/// Zoom / Pan / Tilt test surface, driven entirely by the open device's
-/// [CameraCapabilities]. Each slider is enabled only when the capability is
-/// reported and calls the real `setZoom`/`setPan`/`setTilt`; otherwise it is
+/// Zoom / Pan / Tilt test surface, gated entirely by the open device's
+/// [CameraFeatureMatrix]. Each slider is enabled only when the feature reports
+/// `supported` and calls the real `setZoom`/`setPan`/`setTilt`; otherwise it is
 /// disabled with an explanatory note. On a typical Android phone Pan and Tilt
 /// (and sometimes Zoom) read "not supported" — that is capability negotiation
 /// working, not a bug.
+///
+/// **This file names no backend.** It asks the matrix "may I?" and never "which
+/// camera is this?" — `camera-adapter-authoring` §6.
+///
+/// The zoom *range* still comes from [CameraCapabilities]: the matrix carries a
+/// tri-state status and a free-form metadata map, not a numeric range, and the
+/// base derivation populates no metadata. So the two types do different jobs
+/// here — matrix for "may I?", capabilities for "between what?" — and that is
+/// deliberate, not a half-finished migration to "complete" by inventing a range
+/// on the matrix.
 class PtzTab extends StatefulWidget {
   const PtzTab({super.key, required this.session});
 
@@ -35,13 +46,14 @@ class _PtzTabState extends State<PtzTab> {
             message: 'Connect a camera to test PTZ controls.',
           );
         }
+        // Range only — the enable/disable decision below comes from the matrix.
         final caps = session.capabilities!;
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
             _CapabilitySlider(
               label: 'Zoom',
-              enabled: caps.hasZoom,
+              enabled: session.supports(CameraFeature.zoom),
               value: session.zoom.clamp(caps.minZoomLevel, caps.maxZoomLevel),
               min: caps.minZoomLevel,
               max: caps.maxZoomLevel,
@@ -50,7 +62,7 @@ class _PtzTabState extends State<PtzTab> {
             ),
             _CapabilitySlider(
               label: 'Pan',
-              enabled: caps.hasPan,
+              enabled: session.supports(CameraFeature.pan),
               value: _pan,
               min: 0,
               max: 1,
@@ -62,7 +74,7 @@ class _PtzTabState extends State<PtzTab> {
             ),
             _CapabilitySlider(
               label: 'Tilt',
-              enabled: caps.hasTilt,
+              enabled: session.supports(CameraFeature.tilt),
               value: _tilt,
               min: 0,
               max: 1,

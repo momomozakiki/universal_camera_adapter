@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import '../camera_session.dart';
 
@@ -84,11 +85,14 @@ class PreviewTab extends StatelessWidget {
                   ),
                   min: caps.minZoomLevel,
                   max: caps.maxZoomLevel,
-                  // Disabled when the device reports no usable zoom range —
-                  // never assumed (a phone may report min == max).
-                  onChanged: caps.hasZoom ? session.setZoom : null,
+                  // Enablement comes from the feature matrix (uniform across
+                  // every backend); the numeric range still comes from
+                  // capabilities, which is the only place it exists. Never
+                  // assumed — a phone may report min == max.
+                  onChanged:
+                      session.supports(CameraFeature.zoom) ? session.setZoom : null,
                 ),
-                if (!caps.hasZoom)
+                if (!session.supports(CameraFeature.zoom))
                   Text(
                     'This camera reports no zoom range.',
                     style: theme.textTheme.bodySmall,

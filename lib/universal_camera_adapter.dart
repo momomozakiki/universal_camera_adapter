@@ -35,6 +35,8 @@ export 'src/persistence/camera_profile_store.dart'
     show CameraProfileStore, SharedPreferencesCameraProfileStore;
 export 'src/persistence/camera_secret_store.dart'
     show CameraSecretStore, FlutterSecureStorageCameraSecretStore;
+export 'src/persistence/legacy_prefs_migration.dart'
+    show LegacyCameraSetup, migrateLegacyCameraSetup;
 
 // Modular setup UI (Epic 2.5) — a registry parallel to CameraAdapterRegistry,
 // so an "Add camera" chooser never branches per backend.

@@ -19,11 +19,10 @@ typedef EzvizDeviceChosen = Future<void> Function(
 /// device needs. It then hands the chosen device to [onDeviceChosen] and stops
 /// — it does not open cameras, drive a [CameraSession], or persist anything.
 ///
-/// That split is the point. The same steps are needed whether the caller wants
-/// to connect immediately (the temporary `EzvizBridgeView`) or mint a
-/// `CameraProfile` for later (`EzvizSetupWizard`), so the flow lives here once
-/// and both wrap it. Previously this logic was fused to the session inside
-/// `ezviz_setup_wizard.dart`.
+/// That split is the point: the steps are the same regardless of what the
+/// caller does with the result, so they live here once and `EzvizSetupWizard`
+/// wraps them. Previously this logic was fused to `CameraSession` inside the
+/// old `ezviz_setup_wizard.dart`, which is why it could not be reused.
 ///
 /// **This widget deliberately persists nothing.** The old version cached the
 /// verification code in a bespoke `ezviz_tab.verification_code`
@@ -51,16 +50,12 @@ class EzvizWizardFlow extends StatefulWidget {
   final VoidCallback? onCancel;
 
   @override
-  State<EzvizWizardFlow> createState() => EzvizWizardFlowState();
+  State<EzvizWizardFlow> createState() => _EzvizWizardFlowState();
 }
 
 enum _WizardStep { signIn, devices, connecting }
 
-/// Public so a host can hold a `GlobalKey<EzvizWizardFlowState>` and call
-/// [reloadDevices] — used by `EzvizBridgeView`'s "Switch EZVIZ device" button,
-/// which must refresh the list without tearing the flow down and re-running
-/// SDK init.
-class EzvizWizardFlowState extends State<EzvizWizardFlow>
+class _EzvizWizardFlowState extends State<EzvizWizardFlow>
     with WidgetsBindingObserver {
   final _codeController = TextEditingController();
 
@@ -96,12 +91,6 @@ class EzvizWizardFlowState extends State<EzvizWizardFlow>
       _awaitingSignIn = false;
       _checkSignInAfterResume();
     }
-  }
-
-  /// Reloads the account's device list. Safe to call from a host widget.
-  Future<void> reloadDevices() async {
-    setState(() => _step = _WizardStep.devices);
-    await _loadDevices();
   }
 
   /// `initSDK` must run *before* `getAccessToken` (see

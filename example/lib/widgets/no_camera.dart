@@ -52,6 +52,14 @@ class NoCameraPlaceholder extends StatelessWidget {
                   : const Icon(Icons.videocam),
               label: Text(hasDevice ? 'Connect camera' : 'No camera available'),
             ),
+            if (!hasDevice) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Set one up on the Cameras tab first.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
           ],
         ),
       ),

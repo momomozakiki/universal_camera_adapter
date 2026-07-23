@@ -5,10 +5,6 @@ import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import '../adapter_types.dart';
 
-/// `CameraSecretStore` key the ONVIF password is stored under, scoped to a
-/// profile id. Shared by this wizard (writer) and `CameraSession` (reader).
-const String kOnvifPasswordSecretKey = 'password';
-
 /// The secret-free / secret split for one ONVIF camera being set up.
 ///
 /// Exists so the split can be built and asserted **without a widget, a network,

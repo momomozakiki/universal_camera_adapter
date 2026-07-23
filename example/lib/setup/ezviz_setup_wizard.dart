@@ -4,14 +4,6 @@ import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 import '../adapter_types.dart';
 import '../ezviz/ezviz_wizard_flow.dart';
 
-/// `CameraSecretStore` key the EZVIZ verification code is stored under, scoped
-/// to a profile id. Shared by this wizard (writer) and `CameraSession` (reader).
-///
-/// Replaces the old bespoke `ezviz_tab.verification_code` `SharedPreferences`
-/// key, which kept the code in plaintext outside any profile
-/// (`state-management` Rule 6).
-const String kEzvizVerificationCodeSecretKey = 'verificationCode';
-
 /// Setup flow for EZVIZ cloud cameras.
 ///
 /// A thin adapter over [EzvizWizardFlow], which owns the actual steps (sign in
