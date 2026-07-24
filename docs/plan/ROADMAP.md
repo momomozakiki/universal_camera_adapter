@@ -71,6 +71,16 @@ separate, later plan.
       `camera_adapter_registry.dart`, `camera_types.dart`).
 - [x] `FlutterCameraAdapter` (Android + Windows) with queried zoom capability and the
       `captureFrame()` hung-driver safeguard.
+  - **2026-07-24 — Windows built-in camera relinked.** The Windows webcam had silently never
+    enumerated: `pubspec.yaml` assumed the federated `camera` plugin endorses `camera_windows`
+    transitively, but it does not (only Android/iOS/web are endorsed), so `camera_windows` never
+    entered dependency resolution and was absent from the app's Windows plugin registrant —
+    `availableCameras()` threw `MissingPluginException` at runtime. Fixed by adding
+    `camera_windows: ^0.2.6` as an explicit direct dep in both `pubspec.yaml` and
+    `example/pubspec.yaml` (no Dart changes). `generated_plugin_registrant.cc` now calls
+    `CameraWindowsRegisterWithRegistrar`; `flutter analyze`/`flutter test` (129) green; example
+    `flutter build windows` links cleanly. **Live webcam enumeration + preview is still a pending
+    human hardware pass** (see next action).
 - [x] Barrel export (`lib/universal_camera_adapter.dart`).
 - [x] `MockCameraAdapter` + unit tests (registry, contract-via-mock).
 - [x] Minimal `example/` app — since expanded into a bottom-nav **camera testing toolkit**
