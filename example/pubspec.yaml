@@ -15,6 +15,11 @@ dependencies:
     sdk: flutter
   universal_camera_adapter:
     path: ../
+  # Non-endorsed Windows implementation of the `camera` plugin. Native plugin
+  # registration is driven by the *app's* dependency graph, so it must be a
+  # direct dep here too for generated_plugin_registrant.cc to bind the webcam
+  # on Windows.
+  camera_windows: ^0.2.6
   # Direct dep needed only for MediaKit.ensureInitialized() at app startup
   # (main.dart) — required once before any media_kit API use, per its setup
   # docs. universal_camera_adapter already depends on it transitively for

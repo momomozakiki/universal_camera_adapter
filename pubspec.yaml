@@ -15,9 +15,11 @@ dependencies:
   flutter:
     sdk: flutter
   # Local device cameras (Android + Windows). The federated `camera` plugin
-  # endorses its platform implementations (camera_android, camera_windows)
-  # transitively — no need to list them explicitly for pub resolution.
+  # endorses its Android/iOS/web implementations transitively, but it does NOT
+  # endorse `camera_windows` — that platform implementation must be listed
+  # explicitly or `availableCameras()` throws MissingPluginException on Windows.
   camera: ^0.12.0
+  camera_windows: ^0.2.6 # non-endorsed Windows implementation of `camera`
 
   # --- ONVIF / IP-camera backend dependencies (added in v1.1) ---
   # WS-UsernameToken/HTTP Digest auth landed (2026-07-22): http + xml + crypto
