@@ -90,6 +90,24 @@
         }
       }
     },
+    "branch_policy": {
+      "type": "object",
+      "description": "Feature-branch discipline. Drives the PostToolUse 'you're editing source on a protected branch' nudge and the Stop-hook block for uncommitted source changes on a protected branch.",
+      "additionalProperties": false,
+      "properties": {
+        "require_feature_branch": {
+          "type": "boolean",
+          "description": "When true, editing source while on a protected branch is nudged/blocked, steering work onto a feature branch off the trunk.",
+          "default": true
+        },
+        "protected_branches": {
+          "type": "array",
+          "description": "Branches that should not receive direct source edits. Defaults to [stop_hook.main_branch] when absent.",
+          "items": { "type": "string" },
+          "default": ["main"]
+        }
+      }
+    },
     "workflow_update_check": {
       "type": "object",
       "description": "F5 daily update check for the vendored workflow-core submodule. Opt-in and notification-only: when enabled, SessionStart fetches the submodule at most once per day and reports if it is behind upstream. Never auto-applies the update.",

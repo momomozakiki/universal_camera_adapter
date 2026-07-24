@@ -27,6 +27,10 @@
     "max_blocks": 2,
     "main_branch": "main"
   },
+  "branch_policy": {
+    "require_feature_branch": true,
+    "protected_branches": ["main"]
+  },
   "workflow_update_check": {
     "enabled": false,
     "submodule_path": ".claude/workflow-core",

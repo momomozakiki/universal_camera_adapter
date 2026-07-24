@@ -1,7 +1,7 @@
 ---
 title: Claude Code Hook Integration
-version: 1.8
-last_validated: 2026-07-10
+version: 1.9
+last_validated: 2026-07-24
 official: false
 source: agent-generated, describing this repo's own hooks/workflow_hook.py; hook-contract facts cross-checked against https://code.claude.com/docs/en/hooks
 tags: [hooks, claude-code, integration, workflow, dispatcher]
@@ -11,12 +11,13 @@ estimated_tokens: 5000
 
 # Claude Code Hook Integration
 *Adaptive Self‑Correcting Workflow – Implementation Guide*
-**Version 1.8** — *Describes the dispatcher shipped in this repo; doubles as a golden reference for adopters*
-**Last Validated**: 2026‑07‑10
+**Version 1.9** — *Describes the dispatcher shipped in this repo; doubles as a golden reference for adopters*
+**Last Validated**: 2026‑07‑24
 
 ## Revision History
 | Version | Date       | Change                                                                                                 |
 |---------|------------|--------------------------------------------------------------------------------------------------------|
+| 1.9     | 2026-07-24 | Documented the `branch_policy` block: the `PostToolUse` "editing source on a protected branch" nudge and the `Stop` branch‑discipline block (docs‑only on the trunk exempt); added the `branch_nudged` state field. |
 | 1.8     | 2026-07-10 | Migrated to the unified Documentation Standard: SOURCE-PROVENANCE comment → YAML frontmatter; changelog moved from the comment's `Notes:` field into this table. |
 | 1.7     | 2026-07-10 | Realigned the guide with the real Python dispatcher and this repo's actual `.claude/workflow_config.json`; established as the golden reference for adopters. |
 | 1.6     | (prior)    | Described a different (Flutter/Dart) project — superseded.                                              |
@@ -201,6 +202,16 @@ If source changed, no doc was touched on this call, and no nudge has fired yet
 this session, it emits a **one‑time** advisory. The `doc_nudged` flag guards
 against repetition.
 
+**Branch‑discipline nudge.** When a **source** file is touched this call and
+`branch_policy.require_feature_branch` is on, the handler reads the *live* branch
+(`git rev-parse --abbrev-ref HEAD` — only when source was actually touched, so the
+common non‑source edit stays git‑free) and, if it is one of
+`branch_policy.protected_branches` (default `[stop_hook.main_branch]`), emits a
+one‑time "you're editing source on a protected branch — create a feature branch
+first" advisory. The `branch_nudged` flag guards against repetition. Reading the
+branch live (rather than caching it at `SessionStart`) keeps the nudge correct
+across a mid‑session `git switch`.
+
 ---
 
 ## 3. `Stop` Hook — Phase‑3 Closure Reminder
@@ -252,8 +263,13 @@ Guards against an infinite block loop:
 include pre‑session changes). It short‑circuits (exit `0`) if `stop_hook_active`
 is set or `stop_block_count >= max_blocks`. Otherwise it assembles reminders when:
 
-1. the working tree is **dirty on a non‑`main_branch` branch** → commit & push
-   (`git add -A && git commit && git push`), and/or
+1. the working tree is **dirty with `source_changed` on a protected branch**
+   (`branch_policy.protected_branches`, default `[main_branch]`) → a
+   branch‑discipline block: this should have been a feature branch; move the work
+   onto `feat/<slug>` off the trunk. **Docs‑only** edits on the trunk are exempt
+   (no block) — the rule targets code that can break the codebase. Otherwise, if
+   the tree is **dirty on a non‑protected branch** → the ordinary commit & push
+   reminder (`git add -A && git commit && git push`), and/or
 2. `source_changed` **and not** `ledger_touched` → add a weekly‑ledger entry
    (`history/YYYY-Www.md`, What / Why / Refs).
 
@@ -274,7 +290,9 @@ State lives at:
 
 - `source_changed` — a source‑directory file was edited this session.
 - `ledger_touched` — a file under `ledger.directory` was edited this session.
-- `doc_nudged` — the one‑time `PostToolUse` advisory has fired.
+- `doc_nudged` — the one‑time doc/ledger `PostToolUse` advisory has fired.
+- `branch_nudged` — the one‑time "editing source on a protected branch" advisory
+  has fired.
 - `stop_block_count` — number of `Stop` blocks emitted this session.
 - `session_start_ts` — creation timestamp (used for stale purging).
 
@@ -354,6 +372,10 @@ This is the live config for this repo:
   "stop_hook": {
     "max_blocks": 2,
     "main_branch": "main"
+  },
+  "branch_policy": {
+    "require_feature_branch": true,
+    "protected_branches": ["main"]
   }
 }
 ```
@@ -371,8 +393,10 @@ the dispatcher and contract stay the same:
 | `roadmap_file` | Path (from repo root) to the roadmap holding the `**Next action:**` line. |
 | `ledger.directory` | Where weekly ledger files (`YYYY-Www.md`) live. |
 | `env_check.tool_paths` | Tools to verify at `SessionStart`. Each entry is `{ "path", "version_flag" }`; use `null`/`""` for an existence‑only check. Add your runtimes (node, go, …). |
-| `stop_hook.main_branch` | The branch on which a dirty tree is *not* nagged (commits there are expected to be intentional). |
+| `stop_hook.main_branch` | The trunk name; the default protected branch when `branch_policy.protected_branches` is unset. |
 | `stop_hook.max_blocks` | How many times `Stop` may re‑block before giving up (default 2). |
+| `branch_policy.require_feature_branch` | When true (default), editing source on a protected branch is nudged at `PostToolUse` and blocked at `Stop`, steering work onto a feature branch off the trunk. Set false to disable. |
+| `branch_policy.protected_branches` | Branches that should not receive direct source edits (e.g. `["main"]`, `["main","release"]`). Defaults to `[stop_hook.main_branch]`. |
 
 > **`$CLAUDE_PROJECT_DIR`** in the `command` is provided by Claude Code and
 > expands to the project root, so the path resolves regardless of the session's
@@ -396,10 +420,15 @@ the dispatcher and contract stay the same:
    defaults rather than erroring.
 5. **Testing**:
    - Start a session with `plans/UNFINISHED.md` present → the F4 flag appears.
-   - Edit a source file without touching docs → the one‑time nudge fires (and
-     does **not** fire again).
+   - Edit a source file without touching docs → the one‑time doc/ledger nudge
+     fires (and does **not** fire again).
+   - Edit a source file while on a protected branch (`main`) → the one‑time
+     "create a feature branch first" nudge fires; the same edit on a `feat/*`
+     branch does not.
    - Make an uncommitted change on a feature branch and end the turn → the `Stop`
-     reminder appears, then stops after `max_blocks`.
+     reminder appears, then stops after `max_blocks`. Leave uncommitted **source**
+     on `main` → `Stop` blocks with the branch‑discipline message instead
+     (docs‑only on `main` is exempt).
    - Run the suite: `python -m unittest discover -s tests`.
 
 ---

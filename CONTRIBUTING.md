@@ -6,7 +6,10 @@ We welcome contributions! This package follows the
 
 ## How to contribute
 
-1. **Fork** and create a feature branch (`feat/<desc>` or `fix/<desc>`).
+1. **Fork** and create a feature branch off `main` — **never commit directly to `main`**, for either
+   minor or major changes. Name it by change size: `feat/<desc>` or `refactor/<desc>` for larger work
+   (new backend, contract/API change, refactor); `fix/<desc>`, `docs/<desc>`, or `chore/<desc>` for
+   small localized fixes, docs, or config tweaks.
 2. **Load the governing skill** for the area you're touching (see `.claude/skills/`):
    `camera-adapter-authoring` for backends/contract, `dart-solid-principles` for structure,
    `input-hardening` for any ONVIF/network parsing.
