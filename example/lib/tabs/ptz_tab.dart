@@ -28,9 +28,13 @@ import '../widgets/no_camera.dart';
 /// unimplemented (ONVIF today). The matrix is therefore the mandatory surface
 /// and capabilities the optional one — never dereference it with `!`.
 class PtzTab extends StatefulWidget {
-  const PtzTab({super.key, required this.session});
+  const PtzTab({super.key, required this.session, this.active = true});
 
   final CameraSession session;
+
+  /// Whether this is the visible tab. Off-screen, the preview is not built so
+  /// only one camerax platform view is ever live (see [CameraStage]).
+  final bool active;
 
   @override
   State<PtzTab> createState() => _PtzTabState();
@@ -60,7 +64,7 @@ class _PtzTabState extends State<PtzTab> {
                 message: 'Connect a camera to test PTZ controls.',
               )
             else ...[
-              CameraStage(session: session),
+              CameraStage(session: session, active: widget.active),
               const SizedBox(height: 16),
             ],
             if (session.isOpen) ...[

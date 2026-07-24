@@ -165,6 +165,7 @@ class _ScannerTabState extends State<ScannerTab> {
       children: [
         CameraStage(
           session: session,
+          active: widget.active,
           overlay: _last == null
               ? Align(
                   alignment: Alignment.topCenter,

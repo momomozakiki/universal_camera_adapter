@@ -68,4 +68,24 @@ void main() {
     expect(find.text('scan hint'), findsNothing);
     expect(find.byKey(const Key('preview')), findsOneWidget);
   });
+
+  testWidgets('inactive: renders a placeholder and builds no live preview',
+      (tester) async {
+    final session = await openedSession();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CameraStage(session: session, active: false),
+        ),
+      ),
+    );
+
+    // Off-screen tabs must NOT mount the platform-view preview — only one may be
+    // live at a time or Android trips `_dependents.isEmpty`. The 16:9 box and its
+    // placeholder still lay out so switching tabs doesn't jump.
+    expect(find.byKey(const Key('preview')), findsNothing);
+    expect(find.byType(ColoredBox), findsWidgets);
+    final aspect = tester.widget<AspectRatio>(find.byType(AspectRatio));
+    expect(aspect.aspectRatio, 16 / 9);
+  });
 }

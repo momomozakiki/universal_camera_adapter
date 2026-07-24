@@ -208,11 +208,11 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
     // switches, so scanners just pause rather than tear down.
     final tabs = <Widget>[
       CamerasTab(session: _session, wizards: widget.wizards),
-      PreviewTab(session: _session),
+      PreviewTab(session: _session, active: _index == 1),
       QrScannerTab(session: _session, active: _index == 2),
       BarcodeScannerTab(session: _session, active: _index == 3),
       GalleryTab(session: _session),
-      PtzTab(session: _session),
+      PtzTab(session: _session, active: _index == 5),
     ];
 
     return Scaffold(

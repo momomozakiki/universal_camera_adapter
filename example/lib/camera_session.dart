@@ -188,9 +188,13 @@ class CameraSession extends ChangeNotifier {
 
   /// The live preview widget for the open device. Guard on [isOpen] first.
   ///
-  /// Multiple tabs may each call this: [CameraAdapter.buildPreview] returns a
-  /// `Texture` widget over the shared controller, and multiple `Texture`s over
-  /// one controller render fine in Flutter — no single-preview hoisting needed.
+  /// **Mount only the visible tab's preview.** On some backends (the built-in
+  /// camera on Android) this is a *platform view*, not a cheap `Texture`, and
+  /// mounting several over one controller at once trips a `_dependents.isEmpty`
+  /// framework assertion when a rebuild (e.g. a rename → [notifyListeners])
+  /// tears them down together. `CameraStage` gates on an `active` flag so an
+  /// off-screen tab renders a placeholder instead of calling this — keep it that
+  /// way (Windows `Texture` previews tolerate multi-mount, Android does not).
   Widget buildPreview() => _adapter.buildPreview();
 
   /// Switches to the backend registered under [type] (a no-op if it's already

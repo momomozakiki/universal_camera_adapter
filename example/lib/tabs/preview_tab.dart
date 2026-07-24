@@ -8,9 +8,13 @@ import '../widgets/camera_stage.dart';
 /// (when supported), Capture a frame, Disconnect. Exercises the core
 /// [CameraSession] / `CameraAdapter` contract end to end.
 class PreviewTab extends StatelessWidget {
-  const PreviewTab({super.key, required this.session});
+  const PreviewTab({super.key, required this.session, this.active = true});
 
   final CameraSession session;
+
+  /// Whether this is the visible tab. Off-screen, the preview is not built so
+  /// only one camerax platform view is ever live (see [CameraStage]).
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +44,7 @@ class PreviewTab extends StatelessWidget {
                   child: Center(child: CircularProgressIndicator()),
                 )
               else if (session.isOpen) ...[
-                CameraStage(session: session),
+                CameraStage(session: session, active: active),
                 const SizedBox(height: 16),
                 Text('Zoom', style: theme.textTheme.titleSmall),
                 Slider(
