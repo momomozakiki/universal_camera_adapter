@@ -14,13 +14,17 @@ it's:
 
 - **Built-in phone cameras** (Android via `camera_android`)
 - **Laptop webcams** (Windows via `camera_windows`, using the federated `camera` plugin)
-- **External network/IP cameras** (ONVIF/RTSP — *planned, v1.1*)
+- **External network/IP cameras** (ONVIF/RTSP — *connect + live preview implemented; discovery, PTZ,
+  and snapshot capture still planned*)
 
 It uses the **Adapter Pattern** + **Registry Pattern** so consumers code against the interface, not
 concrete backends.
 
 > **Platform support today:** Android and Windows are fully supported. macOS and Linux are not
-> implemented. The ONVIF/IP-camera backend is currently **scaffolding** (see the [Roadmap](#roadmap)).
+> implemented. The ONVIF/IP-camera backend is **partially implemented** — connect (authenticated) and
+> live RTSP preview work and are hardware-verified; WS-Discovery, PTZ, and snapshot capture are still
+> planned (see the [Roadmap](#roadmap) and [`docs/plan/ROADMAP.md`](docs/plan/ROADMAP.md) for exact
+> per-method status).
 
 ## Architecture
 
@@ -31,7 +35,7 @@ flowchart TD
         Interface["CameraAdapter (abstract contract)"]
         Registry["CameraAdapterRegistry (instance-based factory)"]
         Flutter["FlutterCameraAdapter (Android / Windows)"]
-        ONVIF["ONVIFCameraAdapter (network / IP — planned)"]
+        ONVIF["ONVIFCameraAdapter (network / IP — connect + preview)"]
     end
     App -->|depends on| Interface
     App -->|creates via| Registry
@@ -74,6 +78,9 @@ abstract class CameraAdapter {
 `captureFrame()` returns raw image bytes (usually JPEG). `buildPreview()` returns a live-feed
 widget — **the consumer must call `close()`** (e.g. in `dispose()`) to release resources.
 
+The contract also exposes a `featureMatrix` getter for tri-state capability discovery
+(`supported` / `unvalidated` / `unsupported`) — see [`docs/camera/feature-matrix.md`](docs/camera/feature-matrix.md).
+
 ## Registry (pluggable backends)
 
 The `CameraAdapterRegistry` is **instance-based** (not a singleton), so each app or test builds its
@@ -83,13 +90,17 @@ own isolated registry.
 void main() {
   final registry = CameraAdapterRegistry();
   registry.register('builtin', FlutterCameraAdapter.new, asDefault: true);
-  // Future: registry.register('onvif', ONVIFCameraAdapter.new);
+  registry.register('onvif', ONVIFCameraAdapter.new);   // connect + live RTSP preview
   runApp(MyApp(registry: registry));
 }
 
 // In a widget/controller:
 final adapter = registry.hasDefault() ? registry.createDefault() : registry.create('builtin');
 ```
+
+The example app pairs this with a parallel `CameraSetupWizardRegistry`, so a user can add ONVIF (and
+the example's EZVIZ) cameras through the Cameras tab with no per-brand branching in the UI — see
+[`docs/camera/add-camera-wizard.md`](docs/camera/add-camera-wizard.md).
 
 ## Error handling (the typed surface)
 
@@ -164,16 +175,21 @@ Two related gotchas:
 | Backend | Purpose | Platforms | Status |
 | :--- | :--- | :--- | :--- |
 | **FlutterCameraAdapter** | Local cameras (phone, webcam) via the `camera` plugin | Android, Windows | **Production-ready** |
-| **ONVIFCameraAdapter** | External IP cameras via ONVIF/RTSP | Cross-platform (network) | **Planned (v1.1)** — scaffolding registers under `'onvif'` and throws `UnimplementedError` |
+| **ONVIFCameraAdapter** | External IP cameras via ONVIF/RTSP | Cross-platform (network) | **Partial** — authenticated connect (WS-UsernameToken + HTTP Digest) and live RTSP preview work and are hardware-verified; `listDevices` (WS-Discovery), `capabilities`, `captureFrame` (snapshot), and PTZ still throw `UnimplementedError` |
+| **EzvizCameraAdapter** *(example app only)* | EZVIZ cloud cameras via native SDK-hosted per-user login | Android | Demo backend — lives in [`example/lib/`](example/), not the published `lib/`; connect + playback work, frame capture is a stub |
 
 See [`docs/camera/camera-integration-architecture.md`](docs/camera/camera-integration-architecture.md)
 for the full architecture and the [ONVIF setup guide](docs/camera/onvif-setup-guide.md) for the
-planned network-permission requirements.
+network-permission requirements.
 
 ## Roadmap
 
 - **v1.0** — core interface, registry, `FlutterCameraAdapter`, mock, tests, CI. *(this release)*
-- **v1.1** — `ONVIFCameraAdapter`: Media/PTZ/snapshot, RTSP preview, WS-Discovery.
+- **Landed since v1.0 (unreleased):** `ONVIFCameraAdapter` authenticated connect + live RTSP preview;
+  a tri-state `featureMatrix` on the contract; saved-camera profiles with secure-storage secrets
+  (`CameraProfile` / `CameraProfileStore` / `CameraSecretStore`); a modular add-camera wizard
+  registry; and an EZVIZ example backend.
+- **v1.1 (remaining)** — `ONVIFCameraAdapter`: PTZ, snapshot capture, and WS-Discovery.
 - **v1.2** — two-way audio (intercom) for ONVIF.
 - **v1.3** — motion/event streams (ONVIF events).
 - **v2.0** — macOS/Linux via `camera_macos` / `camera_linux`, if demand arises.

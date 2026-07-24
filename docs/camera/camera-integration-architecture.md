@@ -1,7 +1,7 @@
 ---
 title: Camera Integration Architecture
-version: 1.0
-last_validated: 2026-07-18
+version: 1.1
+last_validated: 2026-07-24
 official: true
 source: project-internal
 tags: [camera, architecture, adapter, registry, onvif]
@@ -17,6 +17,7 @@ estimated_tokens: 900
 | Version | Date       | Change   |
 |---------|------------|----------|
 | 1.0     | 2026-07-18 | Initial. |
+| 1.1     | 2026-07-24 | ONVIF connect + RTSP preview now implemented (no longer blanket scaffolding); dependency note corrected; feature-matrix / profiles / wizard / EZVIZ moved from planned to shipped. |
 
 This is the hardware-access layer. For rules on editing it, see the `camera-adapter-authoring`
 skill; for the untrusted-network-input lens on the ONVIF path, see `input-hardening`.
@@ -62,17 +63,23 @@ SDK. Adding one requires **no change to any consumer**:
 4. Map SDK/network exceptions to the typed surface
    (`StateError`/`UnsupportedError`/`TimeoutException`/`FormatException`).
 
-## ONVIF / IP-camera backend (planned, v1.1)
+## ONVIF / IP-camera backend (partially implemented)
 
-`ONVIFCameraAdapter` (`lib/src/onvif/`) is **scaffolding today**: it registers under `'onvif'` and
-satisfies the contract, but every functional method throws `UnimplementedError` until v1.1. The
-service seams (`onvif_soap.dart`, `onvif_media_service.dart`, `rtsp_preview.dart`) are present with
-input-hardening TODO blocks describing the security requirements for the real implementation.
+`ONVIFCameraAdapter` (`lib/src/onvif/`) registers under `'onvif'` and is **partially implemented and
+hardware-verified**:
 
-**Dependency note:** the heavy RTSP stack (`media_kit`) and the SOAP libraries (`http`, `xml`) are
-**deliberately not declared** in `pubspec.yaml` yet — the scaffolding is pure Dart, so consumers of
-the local-camera path don't pull in a native RTSP dependency. They are added when v1.1 implements
-ONVIF. See [`onvif-setup-guide.md`](onvif-setup-guide.md) for the planned network-permission needs.
+- **Implemented:** `open()` (WS-UsernameToken PasswordDigest auth with an RFC 2617 HTTP Digest
+  fallback → `GetDeviceInformation` → `GetProfiles` → `GetStreamUri`), `close()`, `isOpen`,
+  `buildPreview()` (live RTSP via `media_kit`, forced `rtsp-transport=tcp`), and a hand-built
+  `featureMatrix`. The service seams `onvif_soap.dart`, `onvif_http_client.dart`,
+  `onvif_media_service.dart`, and `rtsp_preview.dart` carry real code plus input-hardening (1 MB
+  response cap, ReDoS-guarded Digest parsing, anti-redirect host check, credential redaction).
+- **Still `UnimplementedError`:** `listDevices()` (WS-Discovery), `capabilities`, `captureFrame()`
+  (snapshot), and PTZ `setZoom`/`setPan`/`setTilt`.
+
+**Dependency note:** the RTSP stack (`media_kit`, `media_kit_video`, `media_kit_libs_video`) and the
+SOAP libraries (`http`, `xml`, `crypto`) **are now declared** in `pubspec.yaml`. See
+[`onvif-setup-guide.md`](onvif-setup-guide.md) for the network-permission requirements.
 
 ## The Golden Rule
 
@@ -80,38 +87,36 @@ Consumers depend only on `CameraAdapter` + `CameraAdapterRegistry`, never a conc
 check `capabilities` at runtime to drive UI, always pair `open()` with `close()`, and handle the
 typed errors. This is what keeps every backend swappable and testable via `MockCameraAdapter`.
 
-## Planned extensions (v1.2+)
+## Shipped since v1.0 (not yet released)
 
-The following foundational features are designed and documented, awaiting implementation:
+The following foundational features are implemented in code (post-1.0, unreleased):
+
+- **Feature matrix** ([`feature-matrix.md`](feature-matrix.md)) — tri-state feature support model
+  (`unsupported` / `unvalidated` / `supported`) alongside the flat boolean flags. Adds
+  `CameraFeature`, `CameraFeatureStatus`, and `CameraFeatureMatrix` as an additive `featureMatrix`
+  getter on `CameraAdapter`; `CameraCapabilities` remains the backward-compatible view.
+
+- **Camera profiles** ([`camera-profiles.md`](camera-profiles.md)) — user-saved camera list with
+  secure-storage-backed secrets. `CameraProfile` (backend-agnostic metadata) + `CameraProfileStore`
+  (shared preferences, injectable) + `CameraSecretStore` (flutter_secure_storage, injectable), in
+  `lib/src/persistence/`. Secrets never persist in plaintext.
+
+- **Modular add-camera wizard** ([`add-camera-wizard.md`](add-camera-wizard.md)) —
+  `CameraSetupWizardRegistry` (`lib/src/setup/`) parallel to `CameraAdapterRegistry`, decoupling
+  setup UI from backend logic. The example app's Cameras tab renders wizard tiles automatically as
+  backends are registered, with zero per-brand branching, and `CameraSession.switchTo()` handles
+  camera switching.
+
+- **EzvizCameraAdapter (per-user, native login)** — EZVIZ backend using native SDK-hosted login (not
+  bridge-based) with per-user tokens ([`ezviz-setup-guide.md`](ezviz-setup-guide.md)). **Lives in the
+  example app (`example/lib/`), not the published `lib/`.** Uses a vendored, patched `ezviz_flutter`
+  (4 upstream bugs fixed on real hardware); connect + playback work, frame capture is still a stub.
+
+## Still planned
 
 - **Discovery pipeline** ([`discovery-pipeline.md`](discovery-pipeline.md)) — three-stage staged
   discovery (OS filtering → local hardware → network/cloud probes) with per-stage observable
   status. Enables multi-backend discovery without blocking local results on slow network probes.
   Introduces the optional `NetworkDiscoverable` mixin for backends supporting live-network
-  discovery (e.g., ONVIF WS-Discovery).
-
-- **Feature matrix** ([`feature-matrix.md`](feature-matrix.md)) — tri-state feature support model
-  (`unsupported` / `unvalidated` / `supported`) replacing flat boolean flags. Adds `CameraFeature`
-  enum, `CameraFeatureStatus`, `CameraFeatureBundle` lookup table, and `CameraFeatureMatrix` as an
-  additive getter on `CameraAdapter` (v1.2). `CameraCapabilities` is derived from the matrix for
-  backward compatibility. Enables querying "does this backend support zoom?" with more granularity
-  (tested vs. unvalidated vs. genuinely unsupported).
-
-- **Camera profiles** ([`camera-profiles.md`](camera-profiles.md)) — user-saved camera list with
-  secure-storage-backed secrets. `CameraProfile` (backend-agnostic metadata) + `CameraProfileStore`
-  (shared preferences, injectable) + `CameraSecretStore` (flutter_secure_storage, injectable).
-  Default-camera selection rules and fallback to live discovery. Fixes today's EZVIZ tab's
-  plaintext-storage issue.
-
-- **Modular add-camera wizard** ([`add-camera-wizard.md`](add-camera-wizard.md)) —
-  `CameraSetupWizardRegistry` parallel to `CameraAdapterRegistry`, decoupling setup UI from backend
-  logic. Enables the example app's Cameras tab to render wizard tiles automatically as backends are
-  registered, with zero hardcoded per-brand branching. Includes example app `CamerasTab`, secret
-  writing from wizard to secure store, and `CameraSession.switchTo()` for seamless camera switching.
-
-- **EzvizCameraAdapter (per-user, native login)** (v1.3, depends on profiles/wizard) — EZVIZ
-  backend using native SDK-hosted login (not bridge-based) with per-user tokens. Implements
-  corrected per-user onboarding ([`ezviz-setup-guide.md`](ezviz-setup-guide.md)) and resolves
-  platform-view frame-capture gap via `capturePicture` spike. Requires vendored, patched
-  `ezviz_flutter` (4 upstream bugs confirmed and fixed on real hardware, awaiting upstream porting
-  or long-term vendoring decision).
+  discovery (e.g., ONVIF WS-Discovery). **Not yet implemented** — `CameraDiscoveryPipeline` /
+  `NetworkDiscoverable` do not exist and `ONVIFCameraAdapter.listDevices()` still throws.

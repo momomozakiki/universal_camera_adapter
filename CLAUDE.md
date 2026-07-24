@@ -11,22 +11,30 @@ the **Adapter + Registry** patterns. Consumers code against the interface, never
 
 **Target platforms:** Android and Windows are fully supported today; macOS/Linux are not implemented
 (no `camera_macos`/`camera_linux` deps). Networked ONVIF cameras are cross-platform (network-based)
-and currently **scaffolding** (see the roadmap).
+and **partially implemented** — authenticated connect (WS-UsernameToken + HTTP Digest) and live RTSP
+preview work and are hardware-verified; `listDevices` (WS-Discovery), `capabilities`, `captureFrame`
+(snapshot), and PTZ still throw `UnimplementedError` (see the roadmap for exact per-method status).
 
 ## Architecture (the contract)
 
 - **`CameraAdapter`** (`lib/src/camera_adapter.dart`) — the abstract contract: `listDevices()`,
-  `open(device, {timeout})`, `close()`, `isOpen`, `capabilities`, `buildPreview()`,
+  `open(device, {timeout})`, `close()`, `isOpen`, `capabilities`, `featureMatrix`, `buildPreview()`,
   `captureFrame({timeout})`, `setZoom/setPan/setTilt({timeout})`. **One adapter instance manages at
   most one open device** — `open()` closes any previous device first. Capabilities are **queried
-  from the opened device, never assumed**. Failures map to a typed surface
+  from the opened device, never assumed**; `featureMatrix` exposes tri-state
+  (`supported`/`unvalidated`/`unsupported`) capability discovery. Failures map to a typed surface
   (`StateError`/`UnsupportedError`/`TimeoutException`/`FormatException`) — no raw plugin/SDK
   exception leaks through.
 - **`CameraAdapterRegistry`** (`lib/src/camera_adapter_registry.dart`) — **instance-based** (not a
   singleton), string-keyed factory map: `register(type, factory, {asDefault})`, `create(type)`,
   `createDefault()`. A default exists only if registered with `asDefault: true`.
 - **`FlutterCameraAdapter`** (`lib/src/flutter_camera_adapter.dart`) — the shipped local backend.
-- **`ONVIFCameraAdapter`** (`lib/src/onvif/`) — the planned network backend (scaffolding today).
+- **`ONVIFCameraAdapter`** (`lib/src/onvif/`) — the network backend, **partially implemented**:
+  authenticated connect + live RTSP preview work; discovery, snapshot, and PTZ still throw
+  `UnimplementedError`.
+- **Persistence + setup** (`lib/src/persistence/`, `lib/src/setup/`) — saved-camera profiles with
+  secure-storage secrets (`CameraProfile`/`CameraProfileStore`/`CameraSecretStore`) and a modular
+  `CameraSetupWizardRegistry` (Epic 2.5), so consumers can persist and add cameras generically.
 
 **The Golden Rule (consumers):** depend only on `CameraAdapter` + `CameraAdapterRegistry`; check
 `capabilities` at runtime to drive UI; always pair `open()` with `close()`; expect and handle the
@@ -98,4 +106,5 @@ helpful nudges, not blockers.
   live under `tests/hook/` (not the Dart `test/` tree) so `flutter test` doesn't pick them up.
 - **Dart tests need no hardware.** Use `MockCameraAdapter` (`test/mock_camera_adapter.dart`);
   CI runs `flutter analyze --fatal-infos` + `flutter test`. Live-hardware smoke tests are
-  manual/local via `example/`.
+  manual/local via `example/` — a profile-driven multi-tab toolkit (Cameras, Preview, QR, Barcode,
+  Gallery, PTZ/Zoom) where ONVIF and EZVIZ are first-class cameras added through setup wizards.

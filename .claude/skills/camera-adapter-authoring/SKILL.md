@@ -158,7 +158,7 @@ not a separate service. Adding one requires **no change** to any consumer.
 - `lib/src/camera_adapter.dart` — the contract.
 - `lib/src/camera_adapter_registry.dart` — the instance-based registry.
 - `lib/src/flutter_camera_adapter.dart` — the shipped backend; reference implementation for rules 1–5.
-- `lib/src/onvif/` — the planned networked backend (scaffolding today).
+- `lib/src/onvif/` — the networked backend; connect + live RTSP preview implemented, discovery/snapshot/PTZ still throw `UnimplementedError`.
 - `test/mock_camera_adapter.dart` — the mock consumers unit-test against; keep it contract-faithful.
 - [`docs/camera/camera-integration-architecture.md`](../../../docs/camera/camera-integration-architecture.md)
   — full architecture and the extension point.
