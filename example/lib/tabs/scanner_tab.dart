@@ -4,6 +4,8 @@ import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 import '../camera_session.dart';
 import '../scanning/barcode_decoder.dart';
 import '../scanning/frame_scanner.dart';
+import '../widgets/camera_bar.dart';
+import '../widgets/camera_stage.dart';
 import '../widgets/no_camera.dart';
 
 /// Shared UI + lifecycle for the QR and 1D barcode tabs. Shows the live preview
@@ -116,9 +118,22 @@ class _ScannerTabState extends State<ScannerTab> {
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CameraBar(session: session),
+          const SizedBox(height: 12),
+          _body(context, session),
+        ],
+      ),
+    );
+  }
+
+  Widget _body(BuildContext context, CameraSession session) {
     if (!session.isOpen) {
       return NoCameraPlaceholder(
-        session: session,
         icon: widget.icon,
         message: 'Connect a camera to scan a ${widget.subject}.',
       );
@@ -126,37 +141,32 @@ class _ScannerTabState extends State<ScannerTab> {
     if (!session.supports(CameraFeature.frameCapture)) {
       // Degrade to a clear "not supported" rather than a stream of per-frame
       // errors — the whole point of querying support instead of assuming it.
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                widget.icon,
-                size: 48,
-                color: Theme.of(context).colorScheme.outline,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'This camera cannot capture still frames yet, so '
-                '${widget.subject} scanning is unavailable for it.',
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              widget.icon,
+              size: 48,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'This camera cannot capture still frames yet, so '
+              '${widget.subject} scanning is unavailable for it.',
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       );
     }
     return Column(
       children: [
-        Expanded(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Center(child: session.buildPreview()),
-              if (_last == null)
-                Align(
+        CameraStage(
+          session: session,
+          overlay: _last == null
+              ? Align(
                   alignment: Alignment.topCenter,
                   child: Container(
                     margin: const EdgeInsets.all(12),
@@ -173,10 +183,10 @@ class _ScannerTabState extends State<ScannerTab> {
                       style: const TextStyle(color: Colors.white),
                     ),
                   ),
-                ),
-            ],
-          ),
+                )
+              : null,
         ),
+        const SizedBox(height: 12),
         _ResultPanel(subject: widget.subject, result: _last, error: _error),
       ],
     );

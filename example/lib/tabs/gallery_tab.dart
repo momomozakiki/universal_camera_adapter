@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../camera_session.dart';
+import '../widgets/camera_bar.dart';
 import '../widgets/no_camera.dart';
 
 /// Capture-and-collect: tap Capture to append a frame from
@@ -65,18 +66,23 @@ class _GalleryTabState extends State<GalleryTab> {
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
-    if (!session.isOpen) {
-      return NoCameraPlaceholder(
-        session: session,
-        icon: Icons.photo_library_outlined,
-        message: 'Connect a camera to capture photos.',
-      );
-    }
     final theme = Theme.of(context);
     return Column(
       children: [
-        Expanded(
-          child: _shots.isEmpty
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: CameraBar(session: session),
+        ),
+        if (!session.isOpen)
+          const Expanded(
+            child: NoCameraPlaceholder(
+              icon: Icons.photo_library_outlined,
+              message: 'Connect a camera to capture photos.',
+            ),
+          )
+        else ...[
+          Expanded(
+            child: _shots.isEmpty
               ? Center(
                   child: Text(
                     'No captures yet.\nTap Capture to grab a frame.',
@@ -140,6 +146,7 @@ class _GalleryTabState extends State<GalleryTab> {
             ],
           ),
         ),
+        ],
       ],
     );
   }

@@ -81,6 +81,14 @@ class CameraSession extends ChangeNotifier {
   String? _selectedId;
   String? get selectedId => _selectedId;
 
+  String? _selectedProfileId;
+
+  /// The saved camera targeted by the shared camera bar's dropdown. Falls back
+  /// to the [activeProfile] so the dropdown always reflects the live camera
+  /// after a restore or reconnect, and after a failed connect rolls back (see
+  /// [connectSelectedProfile]).
+  String? get selectedProfileId => _selectedProfileId ?? _activeProfile?.id;
+
   bool _busy = false;
   bool get busy => _busy;
 
@@ -444,6 +452,7 @@ class CameraSession extends ChangeNotifier {
     await _secretStore?.deleteSecretsForProfile(profileId);
     await store.delete(profileId);
     _unavailableProfileIds.remove(profileId);
+    if (_selectedProfileId == profileId) _selectedProfileId = null;
     await loadProfiles();
   }
 
@@ -459,6 +468,7 @@ class CameraSession extends ChangeNotifier {
   /// open device vanished from the refreshed list, and auto-selects the first
   /// device when nothing valid is selected.
   Future<void> refreshDevices() async {
+    final priorError = _error;
     _update(() {
       _busy = true;
       _error = null;
@@ -482,6 +492,17 @@ class CameraSession extends ChangeNotifier {
         }
         _error = devices.isEmpty ? 'No camera was found on this device.' : null;
       });
+    } on UnimplementedError {
+      // The backend cannot enumerate at all (ONVIF today — WS-Discovery is
+      // deferred). A refresh is meaningless rather than a failure: leave the
+      // current devices/selection untouched and don't surface a scary error.
+      // Restore any prior error so a real open failure (e.g. an unreachable
+      // camera, then the restore fallback landing here) isn't silently wiped by
+      // the reset at the top.
+      _update(() {
+        _busy = false;
+        _error = priorError;
+      });
     } on Object catch (e) {
       _update(() {
         _busy = false;
@@ -492,6 +513,35 @@ class CameraSession extends ChangeNotifier {
 
   /// Changes the selected device without opening it (used by the dropdown).
   void select(String deviceId) => _update(() => _selectedId = deviceId);
+
+  /// Targets a saved camera in the shared camera bar without opening it. Pair
+  /// with [connectSelectedProfile], or let the bar connect on selection.
+  void selectProfile(String profileId) =>
+      _update(() => _selectedProfileId = profileId);
+
+  /// Connects the camera targeted by [selectedProfileId], always through
+  /// [switchToProfile] so a credentialed backend (ONVIF) re-merges its secret —
+  /// the plain [open] path stores a secret-free device and would reconnect
+  /// unauthenticated. No-op when nothing is selected.
+  Future<void> connectSelectedProfile() async {
+    final id = selectedProfileId;
+    if (id == null) return;
+    for (final profile in _profiles) {
+      if (profile.id == id) {
+        await switchToProfile(profile);
+        if (_disposed) return;
+        // If the connect didn't take, roll the dropdown back to the live camera
+        // rather than leaving it pinned to the failed profile.
+        if (!_adapter.isOpen) _update(() => _selectedProfileId = null);
+        return;
+      }
+    }
+    // The targeted profile is gone (e.g. deleted concurrently) — clear + report.
+    _update(() {
+      _selectedProfileId = null;
+      _error = 'That camera is no longer saved.';
+    });
+  }
 
   /// Opens [deviceId] (or the current selection). `open()` closes any previous
   /// device first, so there is no need to close explicitly here.

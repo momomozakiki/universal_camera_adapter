@@ -160,7 +160,18 @@ class CamerasTab extends StatelessWidget {
                       isOpen: session.isOpen,
                       busy: session.busy,
                       canEdit: _canEdit(profile),
-                      onSelect: () => session.switchToProfile(profile),
+                      onSelect: () {
+                        // Tap toggles: a second tap on the live camera turns it
+                        // off. close() is backend-agnostic (never lists devices)
+                        // so it works for ONVIF, where the old implicit-close
+                        // path via refreshDevices could not.
+                        if (session.activeProfile?.id == profile.id &&
+                            session.isOpen) {
+                          session.close();
+                        } else {
+                          session.switchToProfile(profile);
+                        }
+                      },
                       onSetDefault: () => session.setDefaultProfile(profile.id),
                       onEdit: () => _editCamera(context, profile),
                       onRename: () => _renameCamera(context, profile),

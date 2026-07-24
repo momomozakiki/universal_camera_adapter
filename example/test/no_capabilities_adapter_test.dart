@@ -221,6 +221,15 @@ void main() {
     });
 
     testWidgets('PtzTab builds with every slider disabled', (tester) async {
+      // The tab now shows the shared 16:9 preview above the sliders, which in
+      // the default 800×600 test viewport pushes Pan/Tilt below the ListView
+      // fold (and a lazy sliver never builds them). Give it a tall surface so
+      // all three lay out and can be asserted.
+      tester.view.physicalSize = const Size(1000, 3000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
       final session = _sessionWith(_NoCapabilitiesAdapter(const [_device]));
       await session.openDevice(_device);
 

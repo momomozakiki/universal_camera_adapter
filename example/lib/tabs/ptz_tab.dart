@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import '../camera_session.dart';
+import '../widgets/camera_bar.dart';
+import '../widgets/camera_stage.dart';
 import '../widgets/no_camera.dart';
 
 /// Zoom / Pan / Tilt test surface, gated entirely by the open device's
@@ -44,54 +46,60 @@ class _PtzTabState extends State<PtzTab> {
       animation: widget.session,
       builder: (context, _) {
         final session = widget.session;
-        if (!session.isOpen) {
-          return NoCameraPlaceholder(
-            session: session,
-            icon: Icons.control_camera_outlined,
-            message: 'Connect a camera to test PTZ controls.',
-          );
-        }
         // Both derived once on the session, so this tab and PreviewTab cannot
         // disagree about the range or the gate.
         final zoomRange = session.zoomRange;
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            _CapabilitySlider(
-              label: 'Zoom',
-              enabled: session.zoomEnabled,
-              value: session.zoom.clamp(zoomRange.min, zoomRange.max),
-              min: zoomRange.min,
-              max: zoomRange.max,
-              unsupportedNote: session.capabilities == null
-                  ? 'This camera does not report a zoom range.'
-                  : 'This camera reports no zoom range.',
-              onChanged: session.setZoom,
-            ),
-            _CapabilitySlider(
-              label: 'Pan',
-              enabled: session.supports(CameraFeature.pan),
-              value: _pan,
-              min: 0,
-              max: 1,
-              unsupportedNote: 'Pan is not supported by this camera.',
-              onChanged: (v) {
-                setState(() => _pan = v);
-                session.setPan(v);
-              },
-            ),
-            _CapabilitySlider(
-              label: 'Tilt',
-              enabled: session.supports(CameraFeature.tilt),
-              value: _tilt,
-              min: 0,
-              max: 1,
-              unsupportedNote: 'Tilt is not supported by this camera.',
-              onChanged: (v) {
-                setState(() => _tilt = v);
-                session.setTilt(v);
-              },
-            ),
+            CameraBar(session: session),
+            const SizedBox(height: 12),
+            if (!session.isOpen)
+              const NoCameraPlaceholder(
+                icon: Icons.control_camera_outlined,
+                message: 'Connect a camera to test PTZ controls.',
+              )
+            else ...[
+              CameraStage(session: session),
+              const SizedBox(height: 16),
+            ],
+            if (session.isOpen) ...[
+              _CapabilitySlider(
+                label: 'Zoom',
+                enabled: session.zoomEnabled,
+                value: session.zoom.clamp(zoomRange.min, zoomRange.max),
+                min: zoomRange.min,
+                max: zoomRange.max,
+                unsupportedNote: session.capabilities == null
+                    ? 'This camera does not report a zoom range.'
+                    : 'This camera reports no zoom range.',
+                onChanged: session.setZoom,
+              ),
+              _CapabilitySlider(
+                label: 'Pan',
+                enabled: session.supports(CameraFeature.pan),
+                value: _pan,
+                min: 0,
+                max: 1,
+                unsupportedNote: 'Pan is not supported by this camera.',
+                onChanged: (v) {
+                  setState(() => _pan = v);
+                  session.setPan(v);
+                },
+              ),
+              _CapabilitySlider(
+                label: 'Tilt',
+                enabled: session.supports(CameraFeature.tilt),
+                value: _tilt,
+                min: 0,
+                max: 1,
+                unsupportedNote: 'Tilt is not supported by this camera.',
+                onChanged: (v) {
+                  setState(() => _tilt = v);
+                  session.setTilt(v);
+                },
+              ),
+            ],
           ],
         );
       },

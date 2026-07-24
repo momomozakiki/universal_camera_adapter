@@ -15,9 +15,17 @@ The **ONVIF preview after the capabilities fix** (the acceptance test for `08d9e
 **verified by hand** — it streams the RTSP feed with no red screen — but doing so surfaced a
 regression `08d9ec8` had introduced: an unbounded preview height left the whole app unclickable,
 fixed by bounding the preview (see this week's ledger `[fix]` and the `buildPreview()` contract
-note). Still never driven by hand, and required before this slice is called finished: the **edit
-flow** (pre-fill, re-test-before-save, Default-badge survival, idle-vs-active re-open), **rename**,
-and **kill-and-relaunch restore**. Use the EZVIZ CS-H6c at `192.168.0.217` over ONVIF.
+note). Hand-testing the ONVIF camera then surfaced three more UX bugs, now fixed (see this week's
+ledger): the Cameras tab could not turn an ONVIF camera **off** (a tile tap now toggles
+connect/disconnect), Preview could not **reconnect** ONVIF after Disconnect (reconnect now routes
+through `switchToProfile` so the stored secret is re-merged, instead of a credential-free plain
+`open()`), and the camera dropdown only listed the one opened camera — every camera tab now shares
+one `CameraBar` (dropdown of all saved cameras + connect/disconnect) and one `CameraStage` (a
+consistent 16:9 preview). Still never driven by hand, and required before this slice is called
+finished: the **edit flow** (pre-fill, re-test-before-save, Default-badge survival, idle-vs-active
+re-open), **rename**, **kill-and-relaunch restore**, and now the **toggle / reconnect / multi-camera
+dropdown** behaviours (incl. a 4:3 ONVIF stream framing cleanly). Use the EZVIZ CS-H6c at
+`192.168.0.217` over ONVIF.
 
 **Every EZVIZ path is unverifiable on this machine** — the SDK raises `MissingPluginException` on
 Windows and no Android device has been attached — so EZVIZ has analyzer and compile coverage only.
