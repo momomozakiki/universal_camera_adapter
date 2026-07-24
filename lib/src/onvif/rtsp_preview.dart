@@ -100,7 +100,15 @@ class RtspPreview implements OnvifPreviewController {
     if (controller == null) {
       throw StateError('RtspPreview.open() has not completed yet.');
     }
-    return Video(controller: controller);
+    // Key the subtree to the controller instance so a controller swap on re-open
+    // forces a clean remount rather than reusing media_kit's Video elements —
+    // reuse across the swap trips the framework's `_dependents.isEmpty` assertion
+    // when this preview is mounted in several tabs at once. VideoController uses
+    // identity equality, so the key changes exactly when it is recreated.
+    return KeyedSubtree(
+      key: ValueKey(controller),
+      child: Video(controller: controller),
+    );
   }
 
   @override

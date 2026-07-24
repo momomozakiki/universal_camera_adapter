@@ -109,7 +109,16 @@ class FlutterCameraAdapter extends CameraAdapter {
   @override
   Widget buildPreview() {
     final controller = _requireOpen();
-    return CameraPreview(controller);
+    // Key the subtree to the controller instance so a controller swap (close +
+    // reopen on open()) forces a clean remount instead of Flutter reusing the
+    // old CameraPreview elements — reuse across the swap trips the framework's
+    // `_dependents.isEmpty` assertion when this preview is mounted in several
+    // tabs at once. CameraController uses identity equality, so the key changes
+    // exactly when the controller is recreated.
+    return KeyedSubtree(
+      key: ValueKey(controller),
+      child: CameraPreview(controller),
+    );
   }
 
   @override

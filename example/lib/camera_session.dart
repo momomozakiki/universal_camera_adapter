@@ -434,9 +434,13 @@ class CameraSession extends ChangeNotifier {
   ///
   /// Editing an *idle* camera deliberately does not switch to it: changing a
   /// saved setting is not a request to start streaming from it, and yanking the
-  /// live camera away would be a surprise. Editing the *active* one does re-open
-  /// it, since its endpoint or credentials may have just changed underneath the
-  /// open connection.
+  /// live camera away would be a surprise. Editing the *active* one re-opens it
+  /// **only when a connection field changed** (backend or device/endpoint), since
+  /// its endpoint or credentials may have just changed underneath the open
+  /// connection. A pure metadata edit (rename / default flag) must *not* re-open:
+  /// tearing down and recreating the live controller under the multiply-mounted,
+  /// unkeyed preview subtrees trips a `_dependents.isEmpty` framework assertion —
+  /// and restarting the stream for a label change is a needless flicker anyway.
   Future<void> updateProfile(CameraProfile updated) async {
     final store = _profileStore;
     if (store == null) return;
@@ -445,8 +449,16 @@ class CameraSession extends ChangeNotifier {
     await store.save(updated);
     await loadProfiles();
     if (_disposed) return;
-    if (_activeProfile?.id == updated.id) {
-      await switchToProfile(updated);
+    final active = _activeProfile;
+    if (active != null && active.id == updated.id) {
+      final connectionChanged = active.backendType != updated.backendType ||
+          active.device != updated.device;
+      if (connectionChanged) {
+        await switchToProfile(updated);
+      } else {
+        // Metadata-only edit: keep the live controller, just refresh the label.
+        _update(() => _activeProfile = updated);
+      }
     }
   }
 

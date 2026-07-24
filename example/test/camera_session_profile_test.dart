@@ -19,6 +19,10 @@ class _RecordingAdapter extends CameraAdapter {
   final bool failOpen;
 
   CameraDevice? openedWith;
+
+  /// How many times [open] has been called — lets a test assert that a
+  /// metadata-only edit did *not* re-open the live camera.
+  int openCount = 0;
   bool _open = false;
 
   @override
@@ -33,6 +37,7 @@ class _RecordingAdapter extends CameraAdapter {
     Duration timeout = kDefaultCameraTimeout,
   }) async {
     openedWith = device;
+    openCount++;
     if (failOpen) throw StateError('camera unreachable');
     _open = true;
   }
@@ -463,6 +468,37 @@ void main() {
 
       expect(adapter.openedWith?.id, 'dev-p2');
       expect(session.activeProfile?.id, 'p1', reason: 'same profile identity');
+    });
+
+    test('renaming the active camera refreshes the label without re-opening it',
+        () async {
+      final adapter = _RecordingAdapter(const [
+        CameraDevice(id: 'dev-p1', name: 'Cam'),
+      ]);
+      final registry = CameraAdapterRegistry()
+        ..register('builtin', () => adapter, asDefault: true);
+      final store = _FakeProfileStore([profile(id: 'p1', name: 'Old name')]);
+
+      final session = CameraSession(registry, profileStore: store);
+      await session.restore();
+      expect(session.activeProfile?.id, 'p1');
+      final openCountAfterRestore = adapter.openCount;
+      expect(openCountAfterRestore, greaterThan(0));
+
+      // A pure metadata edit (rename) of the live camera must not tear the
+      // CameraController down — that swap is what tripped the framework's
+      // `_dependents.isEmpty` assertion. The device is unchanged, so the guard
+      // takes the metadata-only path: no re-open, label refreshed.
+      await session.updateProfile(
+        session.activeProfile!.copyWith(displayName: 'New name'),
+      );
+
+      expect(adapter.openCount, openCountAfterRestore,
+          reason: 'a rename must not re-open the live camera');
+      expect(session.activeProfile?.id, 'p1');
+      expect(session.activeProfile?.displayName, 'New name',
+          reason: 'the active profile reflects the new label');
+      expect(session.profiles.single.displayName, 'New name');
     });
 
     test('editing an idle camera leaves the live one alone', () async {
