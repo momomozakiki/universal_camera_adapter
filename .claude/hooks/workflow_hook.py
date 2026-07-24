@@ -103,6 +103,7 @@ def default_state() -> Dict[str, Any]:
         "ledger_touched": False,
         "stop_block_count": 0,
         "doc_nudged": False,
+        "branch_nudged": False,
         "session_start_ts": time.time(),
     }
 
@@ -159,6 +160,25 @@ def _git(project_root: Path, *args: str) -> Optional[str]:
         return out.stdout.strip()
     except Exception:
         return None
+
+
+def current_branch(project_root: Path) -> Optional[str]:
+    return _git(project_root, "rev-parse", "--abbrev-ref", "HEAD")
+
+
+def branch_policy(config: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    """Return (require_feature_branch, protected_branches), fail-soft.
+
+    ``protected_branches`` falls back to ``[stop_hook.main_branch]`` when the key
+    is absent or not a list of strings; ``require_feature_branch`` defaults True.
+    """
+    main_branch = (config.get("stop_hook") or {}).get("main_branch", DEFAULT_MAIN_BRANCH)
+    cfg = config.get("branch_policy") or {}
+    require = cfg.get("require_feature_branch", True)
+    protected = cfg.get("protected_branches")
+    if not isinstance(protected, list) or not all(isinstance(b, str) for b in protected):
+        protected = [main_branch]
+    return bool(require), protected
 
 
 def git_status(project_root: Path) -> Dict[str, Any]:
@@ -472,25 +492,43 @@ def handle_post_tool_use(event: Dict[str, Any], config: Dict[str, Any],
     ledger_dir = (config.get("ledger") or {}).get("directory", "history")
 
     doc_touched_now = False
+    source_touched_now = False
     for p in paths:
         if path_under_any(p, source_dirs, project_root):
             state["source_changed"] = True
+            source_touched_now = True
         if path_under_any(p, [ledger_dir], project_root):
             state["ledger_touched"] = True
         if path_under_any(p, doc_dirs, project_root):
             doc_touched_now = True
 
-    nudge = None
+    nudges: List[str] = []
+
+    # Branch-discipline nudge: editing source on a protected branch. Only shell
+    # out to git when source was actually touched (rare), reading the *live*
+    # branch so a mid-session switch is reflected. Fires at most once per session.
+    require_branch, protected = branch_policy(config)
+    if (require_branch and source_touched_now and not state.get("branch_nudged")):
+        branch = current_branch(project_root)
+        if branch and branch in protected:
+            state["branch_nudged"] = True
+            nudges.append(
+                f"⚠️ You're editing source on protected branch `{branch}`. Git best "
+                "practice: create a feature branch first — `git switch -c feat/<slug>` "
+                "(or `fix/`/`docs/` for minor changes) — never commit code directly to "
+                f"`{branch}`."
+            )
+
     if (state.get("source_changed") and not doc_touched_now
             and not state.get("doc_nudged")):
         state["doc_nudged"] = True
-        nudge = ("Consider updating docs and the weekly ledger "
-                 "(history/YYYY-Www.md) if this change is worth tracing.")
+        nudges.append("Consider updating docs and the weekly ledger "
+                      "(history/YYYY-Www.md) if this change is worth tracing.")
 
     save_state(session_id, state)
 
-    if nudge:
-        emit(session_context("PostToolUse", nudge))
+    if nudges:
+        emit(session_context("PostToolUse", "\n\n".join(nudges)))
 
 
 def handle_stop(event: Dict[str, Any], config: Dict[str, Any],
@@ -499,7 +537,7 @@ def handle_stop(event: Dict[str, Any], config: Dict[str, Any],
     state = load_state(session_id)
 
     max_blocks = (config.get("stop_hook") or {}).get("max_blocks", DEFAULT_MAX_BLOCKS)
-    main_branch = (config.get("stop_hook") or {}).get("main_branch", DEFAULT_MAIN_BRANCH)
+    require_branch, protected = branch_policy(config)
 
     if event.get("stop_hook_active") or state.get("stop_block_count", 0) >= max_blocks:
         return  # exit 0, no output
@@ -507,12 +545,24 @@ def handle_stop(event: Dict[str, Any], config: Dict[str, Any],
     reminders: List[str] = []
 
     gs = git_status(project_root)
-    if gs.get("dirty") and gs.get("branch") and gs.get("branch") != main_branch:
-        reminders.append(
-            f"Working tree is dirty on branch `{gs['branch']}`. "
-            "Phase 3 closure: commit & push before ending "
-            "(`git add -A && git commit && git push`)."
-        )
+    branch = gs.get("branch")
+    on_protected = bool(branch and branch in protected)
+    if gs.get("dirty") and branch:
+        if on_protected and require_branch and state.get("source_changed"):
+            # Was: silent on the trunk. Now: uncommitted *source* on a protected
+            # branch is a branch-discipline violation, not a routine commit nudge.
+            reminders.append(
+                f"Uncommitted source changes on protected branch `{branch}` — this "
+                "should have been a feature branch. Move the work onto one before "
+                f"ending: `git switch -c feat/<slug>` (off `{branch}`), then commit & "
+                "push and open a PR. (Docs-only edits on the trunk are exempt.)"
+            )
+        elif not on_protected:
+            reminders.append(
+                f"Working tree is dirty on branch `{branch}`. "
+                "Phase 3 closure: commit & push before ending "
+                "(`git add -A && git commit && git push`)."
+            )
 
     if state.get("source_changed") and not state.get("ledger_touched"):
         reminders.append(
