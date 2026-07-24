@@ -112,6 +112,63 @@ void main() {
     });
   });
 
+  group('CameraSession — switchToProfile keeps the shared selection in sync', () {
+    test('a Cameras-tab switch updates the dropdown other tabs read', () async {
+      // Reproduces the cross-tab staleness: the bar pins the dropdown to A, then
+      // the Cameras tab switches straight to B via switchToProfile (it never
+      // calls selectProfile). Without the sync, selectedProfileId keeps echoing
+      // the stale 'a'.
+      final adapter = RecordingAdapter(const [
+        CameraDevice(id: 'dev-a', name: 'A'),
+        CameraDevice(id: 'dev-b', name: 'B'),
+      ]);
+      final registry = CameraAdapterRegistry()
+        ..register('builtin', () => adapter, asDefault: true);
+      final store = FakeProfileStore([
+        buildProfile(id: 'a', isDefault: true),
+        buildProfile(id: 'b'),
+      ]);
+
+      final session = CameraSession(registry, profileStore: store);
+      await session.loadProfiles();
+
+      session.selectProfile('a');
+      await session.connectSelectedProfile();
+      expect(session.selectedProfileId, 'a');
+
+      await session.switchToProfile(
+        session.profiles.firstWhere((p) => p.id == 'b'),
+      );
+
+      expect(session.activeProfile?.id, 'b');
+      expect(session.selectedProfileId, 'b');
+    });
+
+    test('a failed Cameras-tab switch clears the dropdown selection', () async {
+      // The Cameras-tab path must roll the selection back on a failed open the
+      // same way the bar path does — switchToProfile owns that rollback now.
+      final adapter =
+          RecordingAdapter(const [], enumerable: false, failOpen: true);
+      final registry = CameraAdapterRegistry()
+        ..register('onvif', () => adapter, asDefault: true);
+      final store = FakeProfileStore([
+        buildProfile(id: 'a', backendType: 'onvif'),
+        buildProfile(id: 'p1', backendType: 'onvif'),
+      ]);
+
+      final session = CameraSession(registry, profileStore: store);
+      await session.loadProfiles();
+
+      session.selectProfile('a');
+      await session.switchToProfile(
+        session.profiles.firstWhere((p) => p.id == 'p1'),
+      );
+
+      expect(session.isOpen, isFalse);
+      expect(session.selectedProfileId, isNull);
+    });
+  });
+
   group('CameraSession — deleteProfile clears selection', () {
     test('drops _selectedProfileId when it pointed at the deleted profile',
         () async {

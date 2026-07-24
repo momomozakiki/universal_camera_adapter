@@ -339,14 +339,23 @@ class ONVIFCameraAdapter extends CameraAdapter {
 
   @override
   Future<void> close() async {
+    // Flip _isOpen (and drop the field references) *synchronously*, before the
+    // async preview.dispose() below. Otherwise there is a window during that
+    // await where isOpen is still true but _preview is already null: a tab that
+    // repaints then (a backend switch fires notifyListeners via busy=true before
+    // awaiting this close) passes its isOpen gate, calls buildPreview(), hits the
+    // "no active preview" branch, and throws — a one-frame red/yellow ErrorWidget
+    // flash in the preview box. Closing the gate first means no tab builds the
+    // preview during teardown.
     final preview = _preview;
+    final client = _httpClient;
     _preview = null;
+    _httpClient = null;
+    _isOpen = false;
     if (preview != null) {
       await preview.dispose();
     }
-    _httpClient?.close();
-    _httpClient = null;
-    _isOpen = false;
+    client?.close();
   }
 
   @override

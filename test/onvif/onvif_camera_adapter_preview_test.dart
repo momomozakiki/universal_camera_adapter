@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -52,6 +54,10 @@ class _FakePreviewController implements OnvifPreviewController {
   String? openedPassword;
   bool disposed = false;
 
+  /// When set, [dispose] awaits this before completing — lets a test hold the
+  /// adapter in its teardown window and inspect its state mid-close.
+  Completer<void>? disposeGate;
+
   @override
   Future<void> open(
     Uri streamUri, {
@@ -70,6 +76,8 @@ class _FakePreviewController implements OnvifPreviewController {
   @override
   Future<void> dispose() async {
     disposed = true;
+    final gate = disposeGate;
+    if (gate != null) await gate.future;
   }
 }
 
@@ -136,6 +144,29 @@ void main() {
       await adapter.close();
 
       expect(fakePreview.disposed, isTrue);
+      expect(adapter.isOpen, isFalse);
+    });
+
+    test('close() reports not-open before the async preview dispose completes', () async {
+      // Regression: close() must flip isOpen synchronously, before awaiting the
+      // preview teardown. Otherwise a tab that repaints during that await sees
+      // isOpen==true with a null preview and buildPreview() throws — the
+      // one-frame red/yellow ErrorWidget flash on a backend switch/disconnect.
+      final client = MockClient((request) async => http.Response(_deviceInfoSuccess, 200));
+      adapter = buildAdapter(client);
+      await adapter.open(const CameraDevice(id: 'x', name: 'x'));
+
+      final gate = Completer<void>();
+      fakePreview.disposeGate = gate;
+
+      final closing = adapter.close();
+      // dispose() is now awaiting the gate — the adapter is mid-teardown.
+      expect(fakePreview.disposed, isTrue, reason: 'dispose was reached');
+      expect(adapter.isOpen, isFalse, reason: 'isOpen must be false during teardown');
+      expect(() => adapter.buildPreview(), throwsA(isA<StateError>()));
+
+      gate.complete();
+      await closing;
       expect(adapter.isOpen, isFalse);
     });
 

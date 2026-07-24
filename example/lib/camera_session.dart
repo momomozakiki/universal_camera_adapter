@@ -340,6 +340,9 @@ class CameraSession extends ChangeNotifier {
       _update(() {
         _busy = false;
         _activeProfile = null;
+        // Drop the dropdown selection too, so it falls back to the (now null)
+        // active profile rather than pinning a camera that isn't there.
+        _selectedProfileId = null;
         _unavailableProfileIds.add(profile.id);
         _error = '${profile.displayName} was not found. '
             'Reconnect it, or remove the saved camera.';
@@ -352,8 +355,16 @@ class CameraSession extends ChangeNotifier {
     _update(() => _activeProfile = profile);
     await openDevice(connectable, remember: device);
     if (_disposed) return;
+    // The shared dropdown selection follows the live outcome of the switch, so
+    // both write paths (the camera bar and the Cameras tab, which calls this
+    // directly) converge on one field and can never disagree across tabs.
     if (!_adapter.isOpen) {
-      _update(() => _activeProfile = null);
+      _update(() {
+        _activeProfile = null;
+        _selectedProfileId = null;
+      });
+    } else {
+      _update(() => _selectedProfileId = profile.id);
     }
   }
 
@@ -528,11 +539,10 @@ class CameraSession extends ChangeNotifier {
     if (id == null) return;
     for (final profile in _profiles) {
       if (profile.id == id) {
+        // switchToProfile owns the rollback: on a failed connect it clears
+        // _selectedProfileId itself (for both this bar path and the Cameras
+        // tab), so no separate roll-back is needed here.
         await switchToProfile(profile);
-        if (_disposed) return;
-        // If the connect didn't take, roll the dropdown back to the live camera
-        // rather than leaving it pinned to the failed profile.
-        if (!_adapter.isOpen) _update(() => _selectedProfileId = null);
         return;
       }
     }
