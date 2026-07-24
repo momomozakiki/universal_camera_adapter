@@ -3,6 +3,8 @@
 *.log
 *.pyc
 *.swp
+# Scratch frame/threshold captures written by manual example-app runs
+*.pnm
 .DS_Store
 .atom/
 .build/
