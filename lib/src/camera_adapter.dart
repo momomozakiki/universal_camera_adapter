@@ -106,6 +106,19 @@ abstract class CameraAdapter {
   ///
   /// The consumer **must** ensure [close] is called (e.g. in `dispose()`) to
   /// release the underlying controller/player.
+  ///
+  /// **Sizing is not guaranteed — the caller must impose bounded constraints.**
+  /// Backends differ and are both within their rights: `FlutterCameraAdapter`
+  /// returns a `CameraPreview`, which self-sizes from the device's aspect ratio,
+  /// while `ONVIFCameraAdapter` returns a `media_kit` `Video`, which expands to
+  /// fill whatever it is given. Placing the latter somewhere with an unbounded
+  /// height — a `Column` inside a `SingleChildScrollView`, say — throws
+  /// "BoxConstraints forces an infinite height" during layout. The consequence
+  /// is far worse than a broken preview: the render box is left with no size,
+  /// so **every subsequent hit test in the entire app** throws "Cannot hit test
+  /// a render box that has never been laid out", and the whole UI stops
+  /// responding to input. Wrap the result in an [AspectRatio], a `SizedBox`, or
+  /// an `Expanded`/`StackFit.expand` parent (see `example/lib/tabs/`).
   Widget buildPreview();
 
   /// Captures a single frame as raw image bytes (usually JPEG).

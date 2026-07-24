@@ -79,9 +79,23 @@ class PreviewTab extends StatelessWidget {
                   child: Center(child: CircularProgressIndicator()),
                 )
               else if (session.isOpen) ...[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: session.buildPreview(),
+                // The preview MUST be given a bounded height. This Column sits
+                // in a SingleChildScrollView, so it offers its children an
+                // unbounded height — and `buildPreview()` carries no sizing
+                // guarantee: `CameraPreview` (built-in) self-sizes from its
+                // aspect ratio, but media_kit's `Video` (ONVIF/RTSP) expands to
+                // fill and asserts "BoxConstraints forces an infinite height".
+                // That assertion leaves the box with no size, after which every
+                // hit test in the **whole app** throws "Cannot hit test a render
+                // box that has never been laid out" and nothing is clickable
+                // anywhere — not just on this tab. AspectRatio bounds it for
+                // every backend without naming any of them.
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: session.buildPreview(),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Text('Zoom', style: theme.textTheme.titleSmall),

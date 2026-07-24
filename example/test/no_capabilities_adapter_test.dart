@@ -66,12 +66,22 @@ class _NoCapabilitiesAdapter extends CameraAdapter {
     );
   }
 
+  /// Deliberately **expands** rather than self-sizing, mirroring media_kit's
+  /// `Video` (what `ONVIFCameraAdapter` returns) rather than `CameraPreview`.
+  ///
+  /// This is the shape that broke the app: the original fake returned a
+  /// fixed-size `SizedBox`, which is happy under unbounded height, so the tab
+  /// tests passed while the real ONVIF preview asserted during layout and left
+  /// the whole UI unclickable.
   @override
   Widget buildPreview() {
     if (!_open) {
       throw StateError('Not open. Call open(device) first.');
     }
-    return const SizedBox(key: Key('fake-preview'), width: 16, height: 16);
+    return const SizedBox.expand(
+      key: Key('fake-preview'),
+      child: ColoredBox(color: Color(0xFF000000)),
+    );
   }
 
   @override
@@ -166,6 +176,48 @@ void main() {
 
       final slider = tester.widget<Slider>(find.byType(Slider));
       expect(slider.onChanged, isNull, reason: 'no zoom range to drive');
+    });
+
+    testWidgets('an expanding preview is given a bounded height', (tester) async {
+      // Regression: PreviewTab's Column sits in a SingleChildScrollView, so it
+      // offers unbounded height. A preview that expands (media_kit's Video, i.e.
+      // every ONVIF camera) then asserts during layout and is left with no size,
+      // after which EVERY hit test in the app throws and the entire UI goes
+      // dead — not just this tab. Asserting a finite, non-zero height is what
+      // pins that.
+      final session = _sessionWith(_NoCapabilitiesAdapter(const [_device]));
+      await session.openDevice(_device);
+
+      await _pump(tester, PreviewTab(session: session));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      final size = tester.getSize(find.byKey(const Key('fake-preview')));
+      expect(size.height.isFinite, isTrue);
+      expect(size.height, greaterThan(0));
+      expect(size.width, greaterThan(0));
+    });
+
+    testWidgets('the whole tab stays hit-testable with an expanding preview',
+        (tester) async {
+      // The user-visible symptom was "I cannot click anything", so assert the
+      // thing that actually broke: a tap still reaches an interactive widget.
+      final session = _sessionWith(_NoCapabilitiesAdapter(const [_device]));
+      await session.openDevice(_device);
+
+      await _pump(tester, PreviewTab(session: session));
+      await tester.pump();
+
+      // ensureVisible first: the 16:9 preview pushes the buttons below the fold
+      // of the test viewport, and a tap that silently misses would prove
+      // nothing. Scrolling itself also exercises hit testing.
+      await tester.ensureVisible(find.text('Disconnect'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Disconnect'));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(session.isOpen, isFalse, reason: 'the tap actually reached it');
     });
 
     testWidgets('PtzTab builds with every slider disabled', (tester) async {

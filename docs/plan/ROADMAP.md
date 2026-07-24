@@ -10,9 +10,12 @@ matrix (`8a390ee`), profile/secret persistence (`21fc728`), ONVIF credentials th
 Cameras-first UX with profile restore and removal of the raw-prefs hacks (`9533e47`), the
 nullable-`capabilities` fix (`08d9ec8`), and editing/renaming a saved camera (`2abce25`).
 
-What is *not* done is a human pass. Everything above is covered by tests and a green Windows build,
-but the following have never been driven by hand and must be before this slice is called finished:
-the **ONVIF preview after the capabilities fix** (the acceptance test for `08d9ec8`), the **edit
+What is *not* done is a human pass. Everything above is covered by tests and a green Windows build.
+The **ONVIF preview after the capabilities fix** (the acceptance test for `08d9ec8`) is now
+**verified by hand** — it streams the RTSP feed with no red screen — but doing so surfaced a
+regression `08d9ec8` had introduced: an unbounded preview height left the whole app unclickable,
+fixed by bounding the preview (see this week's ledger `[fix]` and the `buildPreview()` contract
+note). Still never driven by hand, and required before this slice is called finished: the **edit
 flow** (pre-fill, re-test-before-save, Default-badge survival, idle-vs-active re-open), **rename**,
 and **kill-and-relaunch restore**. Use the EZVIZ CS-H6c at `192.168.0.217` over ONVIF.
 
