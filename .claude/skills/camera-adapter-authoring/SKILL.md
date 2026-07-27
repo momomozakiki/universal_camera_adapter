@@ -98,6 +98,40 @@ Two failure directions, **both forbidden**:
   backend-name string compare) inside feature code (anything outside `lib/src/*_adapter.dart` and
   `lib/src/onvif/`)? If yes, **stop** — replace it with a capability / feature-matrix query.
 
+### 6a. Declare every feature — the integration checklist
+
+A new backend must override **`CameraAdapter.declaredFeatures`** with a status for *every*
+`CameraFeature`. This is the checklist you work down when integrating a camera plugin, and it is
+enforced: `example/test/camera_feature_checklist_test.dart` walks `buildRegistry()` and fails by name
+for anything undeclared. Because `CameraFeature` is a closed enum, adding a tenth feature later fails
+that test for every backend until each states a position on it.
+
+The three statuses are a promise about *evidence*, not about intent:
+
+| Status | Means | Use when |
+|---|---|---|
+| `supported` | Manually tested on real hardware. | You have personally seen it work. |
+| `unvalidated` | Wired up, unproven. Shows as **"Under development"**; stays non-interactive. | The code exists but no one has confirmed it on a device. |
+| `unsupported` | Genuinely absent. Shows as **"Not supported"**. | The hardware/SDK has no such capability. |
+
+Defaults **fail safe**: anything you don't declare is `unvalidated`, never `supported`. The derivation
+in `CameraAdapter.featureMatrix` was once optimistic — `frameCapture` and the scanning features
+defaulted to `supported` — and a backend that forgot to override inherited a claim it could not
+honour, telling the user the *camera* lacked a feature the *app* had not wired.
+
+**Diff checklist:**
+
+- Does this diff add a backend, or register a new type in `buildRegistry()`? If yes: does it override
+  `declaredFeatures` with all nine `CameraFeature` values? Run
+  `cd example && flutter test test/camera_feature_checklist_test.dart`.
+- Does it mark anything `supported`? Has that specific feature actually been exercised on real
+  hardware for *this* backend — not merely compiled? If not, it is `unvalidated`.
+- Did a declaration change? Regenerate the published table:
+  `cd example && UPDATE_FEATURE_DOC=1 flutter test test/feature_support_doc_test.dart`
+  (`docs/camera/feature-support.md` is generated; never hand-edit it).
+- Adding a new `CameraFeature`? Also add a human-readable name to `kFeatureLabels` in
+  `example/lib/feature_messages.dart`, or the UI will render a raw enum name.
+
 ### 7. Setup/connection state flows through a generic mechanism, never a one-off store
 
 Camera *selection/setup* is legitimately camera-type-specific: a built-in camera is auto-detected and

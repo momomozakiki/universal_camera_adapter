@@ -127,9 +127,16 @@ class CameraFeatureMatrix {
 
   /// Builds a fully-populated matrix from a partial status map: every
   /// [CameraFeature] not present in [statuses] is filled with [fallback].
+  ///
+  /// [fallback] defaults to [CameraFeatureStatus.unvalidated] — an *undeclared*
+  /// feature is unknown, not proven absent. Claiming `unsupported` would blame
+  /// the hardware for something nobody has checked; `unvalidated` still gates
+  /// interaction (`isSupported` is `false`) while letting the UI say "Under
+  /// development". Pass `unsupported` explicitly when a backend genuinely knows
+  /// the remaining features are absent.
   factory CameraFeatureMatrix.fromStatuses(
     Map<CameraFeature, CameraFeatureStatus> statuses, {
-    CameraFeatureStatus fallback = CameraFeatureStatus.unsupported,
+    CameraFeatureStatus fallback = CameraFeatureStatus.unvalidated,
   }) {
     return CameraFeatureMatrix(<CameraFeature, CameraFeatureSupport>{
       for (final feature in CameraFeature.values)

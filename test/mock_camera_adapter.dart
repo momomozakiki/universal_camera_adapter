@@ -18,14 +18,25 @@ class MockCameraAdapter extends CameraAdapter {
     CameraCapabilities capabilities = const CameraCapabilities(),
     Uint8List? frameBytes,
     CameraFeatureMatrix? featureMatrix,
+    Map<CameraFeature, CameraFeatureStatus> declared =
+        const <CameraFeature, CameraFeatureStatus>{},
   })  : _devices = devices,
         _capabilities = capabilities,
         _featureMatrix = featureMatrix,
+        _declared = declared,
         _frameBytes = frameBytes ?? Uint8List.fromList(<int>[0xFF, 0xD8, 0xFF, 0xD9]);
 
   final List<CameraDevice> _devices;
   final CameraCapabilities _capabilities;
   final Uint8List _frameBytes;
+
+  /// What this fake backend claims per feature — the same declaration a real
+  /// backend writes. Empty by default so the mock exercises the fail-safe
+  /// derivation (everything undeclared ⇒ `unvalidated`).
+  final Map<CameraFeature, CameraFeatureStatus> _declared;
+
+  @override
+  Map<CameraFeature, CameraFeatureStatus> get declaredFeatures => _declared;
 
   /// When null the mock inherits the contract's **base derivation** of
   /// [featureMatrix] from [capabilities] — the path most backends take. Supply
@@ -44,8 +55,18 @@ class MockCameraAdapter extends CameraAdapter {
   Object? errorOnCapture;
   Object? errorOnSetZoom;
 
+  /// Enumeration had no failure hook, so no consumer test could exercise a
+  /// failing `listDevices` — the exact path that shipped a stack trace to the
+  /// "Built-in camera" screen.
+  Object? errorOnListDevices;
+
   @override
-  Future<List<CameraDevice>> listDevices() async => _devices;
+  Future<List<CameraDevice>> listDevices() async {
+    if (errorOnListDevices != null) {
+      throw errorOnListDevices!;
+    }
+    return _devices;
+  }
 
   @override
   Future<void> open(CameraDevice device, {Duration timeout = kDefaultCameraTimeout}) async {

@@ -57,16 +57,55 @@ void main() {
       }
     });
 
-    test('the generic primitives default optimistically', () async {
-      // Deliberate: captureFrame is a required contract method, so the base
-      // derivation assumes it works. A backend whose capture is not actually
-      // wired MUST override — which is what the next group covers.
+    test('the generic primitives default fail-safe, not optimistically',
+        () async {
+      // This assertion is inverted from what it used to be, and the inversion
+      // is the point. The base derivation once defaulted frameCapture and the
+      // scanning features to `supported` on the reasoning that captureFrame is
+      // a required contract method, relying on a doc note telling authors they
+      // "MUST override" to downgrade. That failed open: a backend that simply
+      // forgot inherited a claim its hardware could not honour, and the user
+      // was told the *camera* lacked a feature the *app* had not wired.
+      //
+      // Undeclared now means `unvalidated` — unknown, not proven. Nothing is
+      // enabled on an unproven claim (isSupported stays false), but the UI can
+      // say "Under development" instead of "Not supported". A backend that has
+      // verified a feature declares it via `declaredFeatures`.
       final adapter = await opened();
       final matrix = adapter.featureMatrix;
 
-      expect(matrix.isSupported(CameraFeature.frameCapture), isTrue);
-      expect(matrix.isSupported(CameraFeature.qrScanning), isTrue);
-      expect(matrix.isSupported(CameraFeature.barcodeScanning), isTrue);
+      for (final feature in <CameraFeature>[
+        CameraFeature.frameCapture,
+        CameraFeature.qrScanning,
+        CameraFeature.barcodeScanning,
+      ]) {
+        expect(
+          matrix.statusOf(feature),
+          CameraFeatureStatus.unvalidated,
+          reason: '$feature must not be claimed without a declaration',
+        );
+        expect(matrix.isSupported(feature), isFalse, reason: '$feature');
+      }
+    });
+
+    test('a declared feature wins over the fail-safe default', () async {
+      // declaredFeatures is the single place a claim is written; featureMatrix
+      // layers it over the derivation.
+      final adapter = MockCameraAdapter(
+        devices: const [CameraDevice(id: 'a', name: 'A')],
+        capabilities: const CameraCapabilities(),
+        declared: const <CameraFeature, CameraFeatureStatus>{
+          CameraFeature.frameCapture: CameraFeatureStatus.supported,
+        },
+      );
+      await adapter.open(const CameraDevice(id: 'a', name: 'A'));
+
+      expect(
+        adapter.featureMatrix.statusOf(CameraFeature.frameCapture),
+        CameraFeatureStatus.supported,
+      );
+      expect(adapter.featureMatrix.isSupported(CameraFeature.frameCapture),
+          isTrue);
     });
 
     test('features awaiting a future epic are unvalidated, not unsupported',

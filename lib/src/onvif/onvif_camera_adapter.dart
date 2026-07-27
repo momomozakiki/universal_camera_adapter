@@ -365,16 +365,14 @@ class ONVIFCameraAdapter extends CameraAdapter {
   CameraCapabilities get capabilities => _planned();
 
   @override
-  CameraFeatureMatrix get featureMatrix {
-    if (!_isOpen) {
-      throw StateError('ONVIFCameraAdapter is not open. Call open(device) first.');
-    }
-    // Built explicitly rather than via the base derivation: [capabilities]
-    // still throws UnimplementedError here (ROADMAP v1.1), so the base getter
-    // can't read it. Zoom/PTZ are not yet wired (AbsoluteMove pending), and
-    // frame capture / scanning are unvalidated until GetSnapshotUri lands —
-    // reported unvalidated, not supported, so scanning features stay gated.
-    return CameraFeatureMatrix.fromStatuses(
+  /// The integration checklist for the ONVIF backend.
+  ///
+  /// Zoom/PTZ are not yet wired (AbsoluteMove pending) and frame capture /
+  /// scanning wait on GetSnapshotUri — all `unvalidated` rather than
+  /// `supported`, so scanning features stay gated while the UI can honestly
+  /// call them "Under development" rather than blaming the camera.
+  @override
+  Map<CameraFeature, CameraFeatureStatus> get declaredFeatures =>
       const <CameraFeature, CameraFeatureStatus>{
         CameraFeature.zoom: CameraFeatureStatus.unsupported,
         CameraFeature.pan: CameraFeatureStatus.unsupported,
@@ -385,8 +383,17 @@ class ONVIFCameraAdapter extends CameraAdapter {
         CameraFeature.textRecognitionOcr: CameraFeatureStatus.unvalidated,
         CameraFeature.twoWayAudio: CameraFeatureStatus.unvalidated,
         CameraFeature.motionEvents: CameraFeatureStatus.unvalidated,
-      },
-    );
+      };
+
+  @override
+  CameraFeatureMatrix get featureMatrix {
+    if (!_isOpen) {
+      throw StateError('ONVIFCameraAdapter is not open. Call open(device) first.');
+    }
+    // Built from [declaredFeatures] rather than the base derivation:
+    // [capabilities] still throws UnimplementedError here (ROADMAP v1.1), so
+    // the base getter cannot read it. Same single source of truth either way.
+    return CameraFeatureMatrix.fromStatuses(declaredFeatures);
   }
 
   @override

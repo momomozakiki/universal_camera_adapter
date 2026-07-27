@@ -43,6 +43,21 @@ for this same crash symptom) are not ancestors of `main` — they exist only on 
 no-reopen-on-rename guard. Not ported over in this round (explicit scope decision); still a latent
 hazard worth its own follow-up.
 
+**No-camera messaging + fail-safe feature declarations (2026-07-27, branch
+`fix/no-camera-friendly-error`):** an Android device with no usable built-in camera rendered a ~30-line
+CameraX Java stack trace in the "Built-in camera" wizard. Root cause was two independent defects:
+`camera_android_camerax`'s `availableCameras()` has no `try`/`catch`, so a raw `PlatformException`
+escaped our `CameraException`-only guard, and six UI sites interpolated `'$e'`. Fixed at both layers
+(`lib/src/plugin_error_mapping.dart`, `example/lib/error_messages.dart`), and the same investigation
+closed a matching trap on the feature side: the tri-state `CameraFeatureStatus` model was invisible
+because every consumer collapsed it through `supports()`, and the base `featureMatrix` derivation
+defaulted unwired features to `supported`. Both flipped to fail-safe, with a new
+`CameraAdapter.declaredFeatures` + checklist test. See `history/2026-W31.md` and
+`docs/camera/feature-matrix.md` v1.4.
+**Hardware pass still owed for this change:** the Android empty state, the Android/Windows permission
+hints, and transient-`CameraUnavailable` recovery via Refresh (hold the camera open in the system
+Camera app, then background it) are all unverified on-device — analyzer, unit and widget coverage only.
+
 **Every EZVIZ path is unverifiable on this machine** — the SDK raises `MissingPluginException` on
 Windows and no Android device has been attached — so EZVIZ has analyzer and compile coverage only.
 Attach a phone before trusting any of it.
@@ -363,6 +378,21 @@ they are recorded now rather than rediscovered later.
 ## Epic 4 — v2.0 (if demand arises)
 
 - [ ] macOS/Linux support via `camera_macos` / `camera_linux`.
+
+## Follow-ups (not scheduled)
+
+- [ ] **Generalize the "exhaustive declaration" pattern into the skills.** The
+      `declaredFeatures` + checklist-test + fail-safe-default design (2026-07-27) is a reusable
+      idiom — *closed enum + build-time exhaustiveness check + defaults that fail safe rather than
+      open* — not a camera-specific one. Recommendation from that change: **improve the two existing
+      skills rather than add a third.** `dart-solid-principles` is the natural home (it already owns
+      the *why* behind the design, and this is Open/Closed plus fail-safe defaults);
+      `camera-adapter-authoring` already carries the concrete camera instance in its new §6a. A
+      standalone skill would mostly restate both and add a routing decision for the agent to get
+      wrong. Deferred deliberately — recorded as future work, not built.
+- [ ] **Port the preview multi-mount and no-reopen-on-rename guards to `main`.** `9154be7` /
+      `4382db7` live only on the unmerged `feat/workflow-branch-discipline` branch (see the rename
+      note near the top of this file). Latent hazard.
 
 ---
 

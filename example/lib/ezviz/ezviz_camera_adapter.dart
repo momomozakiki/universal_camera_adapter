@@ -109,21 +109,26 @@ class EzvizCameraAdapter extends CameraAdapter {
     return const CameraCapabilities();
   }
 
+  /// The integration checklist for the EZVIZ backend.
+  ///
+  /// The vendored plugin's native `capturePicture` is a stub (see
+  /// [captureFrame]), so frame capture — and the scanning features built on it
+  /// — are `unvalidated`, not `supported`, until that native patch lands. This
+  /// is the live "Under development" case the tri-state messaging exists for:
+  /// the app has wired these, the camera is not at fault.
   @override
-  CameraFeatureMatrix get featureMatrix {
-    // Reuse the base derivation (zoom/pan/tilt from [capabilities], which also
-    // enforces the open-state check), then downgrade the features that aren't
-    // wired yet: the vendored plugin's native capturePicture is a stub (see
-    // [captureFrame]), so frame capture — and the scanning features built on
-    // it — are unvalidated, not supported, until that native patch lands.
-    return super.featureMatrix.withStatuses(
+  Map<CameraFeature, CameraFeatureStatus> get declaredFeatures =>
       const <CameraFeature, CameraFeatureStatus>{
+        CameraFeature.zoom: CameraFeatureStatus.unsupported,
+        CameraFeature.pan: CameraFeatureStatus.unsupported,
+        CameraFeature.tilt: CameraFeatureStatus.unsupported,
         CameraFeature.frameCapture: CameraFeatureStatus.unvalidated,
         CameraFeature.qrScanning: CameraFeatureStatus.unvalidated,
         CameraFeature.barcodeScanning: CameraFeatureStatus.unvalidated,
-      },
-    );
-  }
+        CameraFeature.textRecognitionOcr: CameraFeatureStatus.unvalidated,
+        CameraFeature.twoWayAudio: CameraFeatureStatus.unvalidated,
+        CameraFeature.motionEvents: CameraFeatureStatus.unvalidated,
+      };
 
   @override
   Widget buildPreview() {

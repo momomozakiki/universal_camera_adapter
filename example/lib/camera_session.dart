@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import 'adapter_types.dart';
+import 'error_messages.dart';
 
 /// The single shared camera lifecycle for the whole example app.
 ///
@@ -136,13 +137,52 @@ class CameraSession extends ChangeNotifier {
   /// This is what feature UI should gate on: it is uniform across every
   /// backend and degrades to "not supported" rather than requiring the caller
   /// to know which backend is live.
-  CameraFeatureMatrix? get featureMatrix =>
-      _adapter.isOpen ? _adapter.featureMatrix : null;
+  ///
+  /// `UnimplementedError` is absorbed to null the same way [capabilities] does
+  /// it: a backend that cannot produce a matrix at all should soft-gate the
+  /// feature UI, not red-screen it. Any *other* error still propagates — that
+  /// is a real bug, not an absent capability.
+  CameraFeatureMatrix? get featureMatrix {
+    if (!_adapter.isOpen) return null;
+    try {
+      return _adapter.featureMatrix;
+    } on UnimplementedError {
+      return null;
+    }
+  }
 
   /// Whether the open device supports [feature]. `false` when nothing is open,
   /// so callers can gate without a null check.
+  ///
+  /// Deliberately still binary: this gates *interaction*, and an `unvalidated`
+  /// feature must stay disabled because it may genuinely throw (EZVIZ's frame
+  /// capture does today). Use [statusOf] to *describe* a feature — that is the
+  /// tri-state view.
   bool supports(CameraFeature feature) =>
       featureMatrix?.isSupported(feature) ?? false;
+
+  /// The tri-state support of [feature] — what the UI should *say*.
+  ///
+  /// Falls back to [CameraFeatureStatus.unsupported] when nothing is open, so
+  /// callers need no null check.
+  CameraFeatureStatus statusOf(CameraFeature feature) {
+    final matrix = featureMatrix;
+    if (matrix == null) {
+      // A null matrix while closed is the documented normal state, so only an
+      // *open* adapter without one is worth reporting.
+      assert(() {
+        if (_adapter.isOpen) {
+          debugPrint(
+            '[CameraSession] open adapter reported no feature matrix; '
+            'treating ${feature.name} as unsupported.',
+          );
+        }
+        return true;
+      }());
+      return CameraFeatureStatus.unsupported;
+    }
+    return matrix.statusOf(feature);
+  }
 
   /// Whether a zoom control should be interactive.
   ///
@@ -501,7 +541,7 @@ class CameraSession extends ChangeNotifier {
                 !devices.any((d) => d.id == _selectedId))) {
           _selectedId = devices.isEmpty ? null : devices.first.id;
         }
-        _error = devices.isEmpty ? 'No camera was found on this device.' : null;
+        _error = devices.isEmpty ? kNoBuiltinCameraFound : null;
       });
     } on UnimplementedError {
       // The backend cannot enumerate at all (ONVIF today — WS-Discovery is
@@ -676,16 +716,12 @@ class CameraSession extends ChangeNotifier {
   }
 
   /// Maps the contract's typed errors to a short, user-facing string.
-  String _describe(Object error) {
-    if (error is StateError) return error.message;
-    if (error is TimeoutException) {
-      return 'The camera took too long to respond.';
-    }
-    if (error is UnsupportedError) {
-      return error.message ?? 'This camera does not support that.';
-    }
-    return '$error';
-  }
+  ///
+  /// Delegates to the app-wide [describeCameraError] so every surface says the
+  /// same thing, and so no path can fall back to `'$error'` — which is how a
+  /// platform stack trace used to reach the screen.
+  String _describe(Object error) =>
+      describeCameraError(error, action: 'using the camera');
 
   @override
   void dispose() {
