@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # Build the example app's Android APK and stage it into dist/ with release discipline.
 #
 # Usage:

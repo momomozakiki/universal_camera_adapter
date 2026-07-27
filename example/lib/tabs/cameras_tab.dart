@@ -80,33 +80,10 @@ class CamerasTab extends StatelessWidget {
   /// on the generic profile — so every saved camera offers it, including
   /// backends with no editor of their own.
   Future<void> _renameCamera(BuildContext context, CameraProfile profile) async {
-    final controller = TextEditingController(text: profile.displayName);
     final name = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Rename camera'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Name',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      builder: (context) => _RenameDialog(initialName: profile.displayName),
     );
-    controller.dispose();
     final trimmed = name?.trim();
     if (trimmed == null || trimmed.isEmpty || trimmed == profile.displayName) {
       return;
@@ -284,6 +261,61 @@ class _ProfileTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Owns its [TextEditingController] for exactly its own element lifetime.
+///
+/// Previously the controller was created and disposed by the caller around
+/// `showDialog`, immediately after `Navigator.pop`. That disposal raced the
+/// dialog route's exit transition — the outgoing `TextField` subtree was
+/// still being rebuilt for one more frame and crashed with "A
+/// TextEditingController was used after being disposed", cascading into a
+/// `_dependents.isEmpty` framework assertion. Owning the controller here ties
+/// its disposal to this widget's own `dispose()`, which Flutter only calls
+/// once the element is actually gone.
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  late final _controller = TextEditingController(text: widget.initialName);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Rename camera'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(
+          labelText: 'Name',
+          border: OutlineInputBorder(),
+        ),
+        onSubmitted: (value) => Navigator.of(context).pop(value),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

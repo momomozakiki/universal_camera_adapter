@@ -139,9 +139,20 @@ class EzvizCameraAdapter extends CameraAdapter {
     // other widgets instead of showing video. Wrap it here so every caller
     // gets a self-contained, properly sized widget, matching what the
     // retired ezviz_tab.dart did manually.
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: EzvizPlayer(onCreated: (controller) => _onPlayerCreated(controller, device)),
+    //
+    // Keyed on the open device's id so switching to a different EZVIZ device
+    // forces a clean remount of this platform view instead of Flutter
+    // reusing the old EzvizPlayer element across the swap. (A same-device
+    // reconnect that only recreates the controller isn't covered by this key
+    // — that would need keying on the controller itself, which isn't
+    // available synchronously here since EzvizPlayer only hands it back via
+    // its `onCreated` callback.)
+    return KeyedSubtree(
+      key: ValueKey(device.id),
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: EzvizPlayer(onCreated: (controller) => _onPlayerCreated(controller, device)),
+      ),
     );
   }
 

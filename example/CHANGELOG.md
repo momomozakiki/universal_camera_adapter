@@ -4,6 +4,12 @@ Tracks the `universal_camera_adapter_example` test-harness app, versioned indepe
 root package. This app is never published (`publish_to: none`); its version exists to name the
 APKs staged into `dist/` by `scripts/build-apk.ps1`. Keep-a-Changelog style; newest on top.
 
+## [1.0.1+2] - 2026-07-27
+
+### Fixed
+- Rebuilt for on-device Android testing of the rename-dialog `_dependents.isEmpty` crash fix and
+  the EZVIZ preview builder `KeyedSubtree` parity fix.
+
 ## [1.0.0+1] - 2026-07-19
 
 ### Added
