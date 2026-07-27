@@ -23,9 +23,25 @@ through `switchToProfile` so the stored secret is re-merged, instead of a creden
 one `CameraBar` (dropdown of all saved cameras + connect/disconnect) and one `CameraStage` (a
 consistent 16:9 preview). Still never driven by hand, and required before this slice is called
 finished: the **edit flow** (pre-fill, re-test-before-save, Default-badge survival, idle-vs-active
-re-open), **rename**, **kill-and-relaunch restore**, and now the **toggle / reconnect / multi-camera
+re-open), **kill-and-relaunch restore**, and now the **toggle / reconnect / multi-camera
 dropdown** behaviours (incl. a 4:3 ONVIF stream framing cleanly). Use the EZVIZ CS-H6c at
 `192.168.0.217` over ONVIF.
+
+**Rename hand-verified (2026-07-27):** driving rename by hand on Android (`CPH2113`, built-in
+backend) surfaced a real `_dependents.isEmpty` red-screen crash that two prior fix attempts
+(`9154be7`, `4382db7`) had not actually resolved — both targeted camera-preview mounting, but the
+Cameras tab (where rename lives) renders no preview at all, so neither theory could have been
+correct. Root-caused via a captured on-device stack trace (`flutter run` stdout, not `adb logcat`
+— the previous attempts' logcat was rate-limited): "A TextEditingController was used after being
+disposed," from the rename dialog's own controller being disposed while the `AlertDialog` route's
+exit transition was still rebuilding it. Fixed on branch `fix/camera-rename-dependents-crash` by
+giving the dialog its own `State`-owned controller; confirmed fixed on hardware (3 renames, no
+crash) plus a new regression test. See `history/2026-W31.md` for the full writeup. **Open item
+found during this investigation:** `9154be7`/`4382db7` (an earlier, separate pair of fix attempts
+for this same crash symptom) are not ancestors of `main` — they exist only on the unmerged
+`feat/workflow-branch-discipline` branch, so `main` still lacks their preview multi-mount guard and
+no-reopen-on-rename guard. Not ported over in this round (explicit scope decision); still a latent
+hazard worth its own follow-up.
 
 **Every EZVIZ path is unverifiable on this machine** — the SDK raises `MissingPluginException` on
 Windows and no Android device has been attached — so EZVIZ has analyzer and compile coverage only.
