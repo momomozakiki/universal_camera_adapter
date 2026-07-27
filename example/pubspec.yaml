@@ -4,7 +4,7 @@ publish_to: none
 # Versions the example APK independently of the root package (drives dist/ artifact
 # names via scripts/build-apk.ps1). Bump on every distributable build — see
 # .claude/skills/release-packaging/SKILL.md.
-version: 1.0.2+3
+version: 1.0.3+4
 
 environment:
   sdk: ">=3.0.0 <4.0.0"

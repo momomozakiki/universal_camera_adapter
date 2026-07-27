@@ -13,9 +13,20 @@ import 'camera_profile.dart';
 /// tests).
 ///
 /// **Default-selection contract:** at most one profile has `isDefault == true`
-/// at a time, enforced by the mutation methods here. Deleting the current
-/// default auto-promotes the most-recently-created remaining profile; an empty
-/// store simply has no default (the caller falls back to live discovery).
+/// at a time, enforced by the mutation methods here.
+///
+/// - The **first** profile saved into an empty store becomes the default, so a
+///   fresh install still opens a camera at launch without the user having to
+///   know the setting exists.
+/// - Every **later** save leaves the default alone. Adding a camera must never
+///   change what opens at startup — when it did, adding a camera silently
+///   promoted it into the launch path and an unopenable one made the app
+///   unlaunchable.
+/// - Deleting the current default auto-promotes the most-recently-created
+///   remaining profile, so the app is never left with saved cameras and no
+///   default.
+/// - An empty store simply has no default (the caller falls back to live
+///   discovery).
 abstract class CameraProfileStore {
   /// All saved profiles. Never throws: an unreadable/corrupt store loads as an
   /// empty list rather than crashing the app on upgrade.
@@ -24,6 +35,9 @@ abstract class CameraProfileStore {
   /// Inserts or updates [profile] (matched by [CameraProfile.id]). If
   /// [CameraProfile.isDefault] is `true`, every other profile is flipped off so
   /// exactly one default remains.
+  ///
+  /// Saving the very first profile into an empty store makes it the default;
+  /// later saves never change which profile is default.
   Future<void> save(CameraProfile profile);
 
   /// Removes the profile with [id]. If it was the default, the most-recent
@@ -58,7 +72,18 @@ class SharedPreferencesCameraProfileStore implements CameraProfileStore {
   @override
   Future<void> save(CameraProfile profile) async {
     final profiles = await loadAll();
-    final incoming = profile;
+    // The first camera on a fresh install becomes the default, so the app still
+    // opens something at launch without the user finding the setting. Scoped to
+    // an *empty* store on purpose: "promote whenever nothing is default" would
+    // re-create the most-recent-wins behaviour this change removed, on any
+    // store whose profiles predate the rule.
+    //
+    // This also fires for the first profile written by `migrateLegacyCameraSetup`
+    // on an upgrading install, which is intended: those installs previously had
+    // one camera that the app connected to on its own, so promoting the imported
+    // copy reproduces the behaviour the user already had rather than silently
+    // dropping them to "nothing opens".
+    final incoming = profiles.isEmpty ? profile.copyWith(isDefault: true) : profile;
 
     var replaced = false;
     final next = <CameraProfile>[];
@@ -86,6 +111,13 @@ class SharedPreferencesCameraProfileStore implements CameraProfileStore {
 
     final next = profiles.where((p) => p.id != id).toList();
     final removedWasDefault = removed.first.isDefault;
+    // Most-recent-wins survives *here* only, and deliberately: `save()` no
+    // longer promotes and `CameraSession._defaultProfile` no longer falls back,
+    // because merely adding a camera must not change what launches. Deleting
+    // the default is different — it is an explicit act on the default itself,
+    // and leaving saved cameras with no default at all would mean the app stops
+    // opening anything at launch with no indication why. Revisit if it ever
+    // surprises anyone; it is the same mechanism, only better justified.
     if (removedWasDefault && next.isNotEmpty && !next.any((p) => p.isDefault)) {
       final promoted = _mostRecent(next);
       for (var i = 0; i < next.length; i++) {

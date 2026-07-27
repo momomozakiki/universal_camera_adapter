@@ -22,6 +22,13 @@ All notable changes to this package are documented here. This project adheres to
   message for "denied"/"permission", which both missed real failures and matched unrelated ones.
 
 ### Changed
+- **`CameraProfileStore` default-selection contract.** The first profile saved into an *empty* store
+  now becomes the default, and no later save ever changes which profile is default. Previously no
+  save set a default at all, which left consumers falling back to "most recently created wins" at
+  startup — so merely adding a camera silently changed what opened at next launch, and adding one
+  that could not be opened made the app unlaunchable. Deleting the current default still promotes
+  the most-recent remaining profile, which is an explicit act on the default rather than a
+  side effect of adding.
 - **`CameraAdapter.featureMatrix` now fails safe.** `frameCapture`, `qrScanning` and
   `barcodeScanning` previously defaulted to `CameraFeatureStatus.supported`, relying on a doc note
   telling backends they "MUST override" to downgrade. A backend that forgot inherited a claim its
@@ -33,6 +40,14 @@ All notable changes to this package are documented here. This project adheres to
   `unvalidated` was already, and remains, not-supported for gating purposes.
 
 ### Added
+- **`CameraRestoreGuard`** (+ `SharedPreferencesCameraRestoreGuard`) — a crash-loop breaker for the
+  "open my saved camera at startup" path. Mark before the open, clear after; a launch that finds the
+  mark still set knows the previous one did not survive and can skip the auto-open. This exists
+  because a native backend can kill the **process** rather than throw — the vendored EZVIZ plugin
+  dereferenced an uninitialised SDK handle on a Kotlin coroutine, producing a `FATAL EXCEPTION` no
+  Dart `try`/`catch` can intercept — and restore runs before any UI exists to escape from, so the
+  app became unlaunchable with no way in to remove the offending camera. Optional and
+  injectable: omit it and restore behaves exactly as before.
 - **`CameraAdapter.declaredFeatures`** — a concrete (non-breaking, empty-by-default) getter where a
   backend states a status for every `CameraFeature`, readable without opening a device.
   `featureMatrix` layers it over the queried derivation, so a claim lives in exactly one place.

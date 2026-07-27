@@ -3,7 +3,8 @@
 The canonical, checkable "where are we" tracker. Follow it top-down; update the status boxes and
 commit note as each item is verified and committed. This supersedes ad-hoc status notes.
 
-**Next action:** **Manually verify the Epic 2.5 slice against real hardware, then Epic 2.6.**
+**Next action:** **Resume the Epic 2.5 hardware pass on `1.0.3+4` (the startup crash that blocked it
+is fixed and the app launches), then Epic 2.6.**
 Epic 2.5 is code-complete apart from the deliberately deferred WS-Discovery pipeline: the feature
 matrix (`8a390ee`), profile/secret persistence (`21fc728`), ONVIF credentials through
 `open(device)` (`4ea58ab`), the setup-wizard registry and three wizards (`13a0697`), the
@@ -57,6 +58,28 @@ defaulted unwired features to `supported`. Both flipped to fail-safe, with a new
 **Hardware pass still owed for this change:** the Android empty state, the Android/Windows permission
 hints, and transient-`CameraUnavailable` recovery via Refresh (hold the camera open in the system
 Camera app, then background it) are all unverified on-device — analyzer, unit and widget coverage only.
+
+**Startup-restore crash fixed, and the app is launchable again (2026-07-27, same branch, `1.0.3+4`):**
+the hardware pass above was blocked because the app died on every launch. A saved EZVIZ camera made
+it unlaunchable: `EzvizCameraAdapter.listDevices()` reached the native `getDeviceList` with no prior
+`initSDK` (init happened only in `open()`, and restore enumerates before it opens), so
+`EZGlobalSDK.getInstance()` was null and the vendored plugin's `NullPointerException` — thrown past a
+`catch (e: BaseException)` — killed the process during startup restore, before any UI existed to
+remove the offending camera from. **Latent since `8d10645` (2026-07-22), not a regression:** the
+parent commit's own build (`1.0.1+2` == `0aaf469`) was re-installed against the same app data and
+crashed identically, which also settles the open question of whether `36f6e06` caused it. Fixed with a
+shared `_ensureSdk()`, a backend-agnostic `CameraRestoreGuard` crash-loop breaker, and removal of the
+"most recently created wins" default fallback (adding a camera no longer changes what launches).
+Verified on `CPH2113` with app data preserved — including the exact killing scenario re-run with EZVIZ
+set as default. See `history/2026-W31.md`.
+
+**Open item — Candidate A, not fixed:** `meansNoCamera()` matches any `InitializationException`, and
+CameraX raises that for permission denial and transient failures too, so a recoverable error is
+flattened into an empty list ("No built-in camera found"). Confirmed by
+`test/flutter_camera_adapter_error_test.dart`, written as *characterisation*. Not narrowed here:
+matching on message text is what `36f6e06` deliberately removed, and narrowing safely needs a real
+logcat payload from an affected device. Not reproducible on `CPH2113`, whose built-in cameras
+enumerate and preview normally.
 
 **Every EZVIZ path is unverifiable on this machine** — the SDK raises `MissingPluginException` on
 Windows and no Android device has been attached — so EZVIZ has analyzer and compile coverage only.

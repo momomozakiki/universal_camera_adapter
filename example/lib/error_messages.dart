@@ -18,6 +18,15 @@ import 'package:flutter/foundation.dart';
 /// (`camera_session.dart`, and twice in `builtin_camera_setup_wizard.dart`).
 const String kNoBuiltinCameraFound = 'No built-in camera found';
 
+/// Shown when `CameraRestoreGuard` detects that the previous launch died while
+/// opening the default camera, so this launch skipped the auto-open.
+///
+/// Deliberately says what happened and what to do, without naming a cause: the
+/// process was killed, so nothing survived that could describe *why*.
+const String kRestoreSkippedAfterCrash =
+    'The last launch stopped while opening your default camera, so it was not '
+    'opened this time. Pick a camera below, or remove the one that failed.';
+
 /// A short, user-facing sentence for [error].
 ///
 /// [action] is an infinitive phrase naming what failed — `'looking for

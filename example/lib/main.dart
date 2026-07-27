@@ -98,6 +98,9 @@ Future<void> main() async {
   final registry = buildRegistry();
   final profileStore = SharedPreferencesCameraProfileStore();
   final secretStore = FlutterSecureStorageCameraSecretStore();
+  // Without this, a backend that kills the process during startup restore makes
+  // the app unlaunchable — see CameraRestoreGuard.
+  final restoreGuard = SharedPreferencesCameraRestoreGuard();
 
   // Before the session loads profiles, so an imported camera is visible on the
   // very first frame rather than after a restart.
@@ -111,6 +114,7 @@ Future<void> main() async {
       registry: registry,
       profileStore: profileStore,
       secretStore: secretStore,
+      restoreGuard: restoreGuard,
       wizards: buildWizardRegistry(
         registry: registry,
         secretStore: secretStore,
@@ -125,12 +129,14 @@ class ExampleApp extends StatelessWidget {
     required this.registry,
     required this.profileStore,
     required this.secretStore,
+    required this.restoreGuard,
     required this.wizards,
   });
 
   final CameraAdapterRegistry registry;
   final CameraProfileStore profileStore;
   final CameraSecretStore secretStore;
+  final CameraRestoreGuard restoreGuard;
   final CameraSetupWizardRegistry wizards;
 
   @override
@@ -142,6 +148,7 @@ class ExampleApp extends StatelessWidget {
         registry: registry,
         profileStore: profileStore,
         secretStore: secretStore,
+        restoreGuard: restoreGuard,
         wizards: wizards,
       ),
     );
@@ -158,12 +165,14 @@ class CameraToolkitPage extends StatefulWidget {
     required this.registry,
     required this.profileStore,
     required this.secretStore,
+    required this.restoreGuard,
     required this.wizards,
   });
 
   final CameraAdapterRegistry registry;
   final CameraProfileStore profileStore;
   final CameraSecretStore secretStore;
+  final CameraRestoreGuard restoreGuard;
   final CameraSetupWizardRegistry wizards;
 
   @override
@@ -175,6 +184,7 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
     widget.registry,
     profileStore: widget.profileStore,
     secretStore: widget.secretStore,
+    restoreGuard: widget.restoreGuard,
   );
 
   int _index = 0;

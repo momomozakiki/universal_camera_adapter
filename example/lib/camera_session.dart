@@ -40,18 +40,24 @@ class CameraSession extends ChangeNotifier {
     this._registry, {
     CameraProfileStore? profileStore,
     CameraSecretStore? secretStore,
+    CameraRestoreGuard? restoreGuard,
   })  : _adapter = _registry.createDefault(),
         _adapterType = _registry.defaultType!,
         _profileStore = profileStore,
-        _secretStore = secretStore;
+        _secretStore = secretStore,
+        _restoreGuard = restoreGuard;
 
   final CameraAdapterRegistry _registry;
 
-  /// Both optional: a consumer that never saves a camera (and every existing
+  /// All optional: a consumer that never saves a camera (and every existing
   /// test) constructs `CameraSession(registry)` and gets the original
   /// live-discovery-only behaviour.
   final CameraProfileStore? _profileStore;
   final CameraSecretStore? _secretStore;
+
+  /// Absent means no crash-loop protection — [restore] behaves as it always
+  /// did. See [CameraRestoreGuard] for why this cannot be a `try`/`catch`.
+  final CameraRestoreGuard? _restoreGuard;
 
   CameraAdapter _adapter;
 
@@ -315,16 +321,44 @@ class CameraSession extends ChangeNotifier {
   /// Call once at startup in place of [refreshDevices]. An empty store never
   /// fabricates a profile — it simply behaves as the app did before profiles
   /// existed, yielding a transient selection only.
+  ///
+  /// Guarded by [CameraRestoreGuard] when one is injected: a launch that finds
+  /// the previous restore unfinished skips the auto-open entirely. That is the
+  /// only defence available against a backend that kills the *process* rather
+  /// than throwing, since this runs before any UI exists to escape from.
   Future<void> restore() async {
     await loadProfiles();
     if (_disposed) return;
+
+    final guard = _restoreGuard;
+    if (await guard?.wasRestoreInterrupted() ?? false) {
+      // The previous launch died mid-restore. Clear the mark first so this is
+      // a one-shot skip: the user can still connect the camera by hand, and a
+      // clean launch afterwards restores normally.
+      await guard!.endRestore();
+      if (_disposed) return;
+      await refreshDevices();
+      // After refreshDevices, which resets _error at its start and rewrites it
+      // at its end — setting this first would be silently overwritten.
+      _update(() => _error = kRestoreSkippedAfterCrash);
+      return;
+    }
 
     final target = _defaultProfile();
     if (target == null) {
       await refreshDevices();
       return;
     }
-    await switchToProfile(target);
+    await guard?.beginRestore();
+    try {
+      await switchToProfile(target);
+    } finally {
+      // finally, not after the call: switchToProfile can throw, and a mark left
+      // set by a *Dart* failure would wrongly suppress the next launch's
+      // restore. Only process death should trip the guard.
+      await guard?.endRestore();
+    }
+    if (_disposed) return;
     if (_activeProfile == null && !_adapter.isOpen) {
       // The restore didn't take (device gone, camera unreachable). Fall back so
       // the user still has a working app rather than an empty screen.
@@ -332,15 +366,21 @@ class CameraSession extends ChangeNotifier {
     }
   }
 
+  /// The saved camera to open at startup: the one explicitly marked default, or
+  /// none.
+  ///
+  /// Deliberately has **no** "most recently created wins" fallback. That
+  /// fallback meant merely *adding* a camera silently changed what launched
+  /// next time — which is how a newly-added EZVIZ camera promoted itself into
+  /// the startup path and made the app unlaunchable. Choosing what opens at
+  /// launch is an explicit act (`setDefaultProfile`, wired to the Cameras tab);
+  /// with nothing marked, the app lands on the camera list, which is a normal
+  /// state rather than a failure.
   CameraProfile? _defaultProfile() {
-    if (_profiles.isEmpty) return null;
     for (final profile in _profiles) {
       if (profile.isDefault) return profile;
     }
-    // No explicit default — most recently created wins.
-    return _profiles.reduce(
-      (a, b) => b.createdAt.isAfter(a.createdAt) ? b : a,
-    );
+    return null;
   }
 
   /// Opens a saved camera: fetches its secret, merges it into a **transient**
