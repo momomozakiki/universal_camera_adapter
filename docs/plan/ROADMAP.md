@@ -8,9 +8,9 @@ commit note as each item is verified and committed. This supersedes ad-hoc statu
 test phone, with the startup-restore crash gone. Two non-critical defects found during that pass
 were deliberately **not** fixed and are recorded under "Follow-ups (not scheduled)": the
 intermittent ONVIF preview hang, and the EZVIZ re-sign-in dead end. No epic is started from
-here; the next item is chosen by the user in a later session. **Separately still outstanding:**
-the Windows webcam live enumeration + preview hardware pass (Epic 1) — the pass just run was
-Android-only and says nothing about Windows.
+here; the next item is chosen by the user in a later session. **No hardware-pass debt remains:** the
+Windows webcam pass (Epic 1) was driven by hand on 2026-07-28 — a USB webcam and the built-in webcam
+both enumerate and preview — so Android and Windows are now each verified on real hardware.
 Epic 2.5 is code-complete apart from the deliberately deferred WS-Discovery pipeline: the feature
 matrix (`8a390ee`), profile/secret persistence (`21fc728`), ONVIF credentials through
 `open(device)` (`4ea58ab`), the setup-wizard registry and three wizards (`13a0697`), the
@@ -150,8 +150,10 @@ separate, later plan.
     `camera_windows: ^0.2.6` as an explicit direct dep in both `pubspec.yaml` and
     `example/pubspec.yaml` (no Dart changes). `generated_plugin_registrant.cc` now calls
     `CameraWindowsRegisterWithRegistrar`; `flutter analyze`/`flutter test` (129) green; example
-    `flutter build windows` links cleanly. **Live webcam enumeration + preview is still a pending
-    human hardware pass** (see next action).
+    `flutter build windows` links cleanly. **Live webcam enumeration + preview verified by hand on
+    2026-07-28:** both a USB webcam and the machine's built-in webcam enumerate and preview correctly
+    in the Windows example app, confirming the registrant fix against real hardware. The USB path has
+    the lowest perceived latency of any backend tested — effectively imperceptible.
 - [x] Barrel export (`lib/universal_camera_adapter.dart`).
 - [x] `MockCameraAdapter` + unit tests (registry, contract-via-mock).
 - [x] Minimal `example/` app — since expanded into a bottom-nav **camera testing toolkit**
@@ -401,6 +403,12 @@ they are recorded now rather than rediscovered later.
 - [ ] **Further low-latency RTSP tuning** — beyond the `profile=low-latency` + `cache=no` fix already
       shipped in `lib/src/onvif/rtsp_preview.dart` (deliberately avoiding `untimed`/`no-correct-pts`,
       which cause frame pacing artifacts).
+      **Field baseline (2026-07-28, Windows):** with those settings shipped, ONVIF/RTSP preview shows
+      a small but perceptible delay, measured against a USB webcam on the same machine whose delay is
+      effectively imperceptible. That gap is **expected, not a defect** — RTSP adds camera-side H.264
+      encoding, network transit, client-side decode and jitter buffering that a USB capture path does
+      not have. Recorded as the baseline this bullet would improve on, **not** as a bug. Distinct from
+      the intermittent ONVIF *hang* under "Follow-ups (not scheduled)", which is a different failure.
 
 ## Epic 3 — v1.2 / v1.3 (future)
 
