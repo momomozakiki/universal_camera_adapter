@@ -45,9 +45,11 @@ exit transition was still rebuilding it. Fixed on branch `fix/camera-rename-depe
 giving the dialog its own `State`-owned controller; confirmed fixed on hardware (3 renames, no
 crash) plus a new regression test. See `history/2026-W31.md` for the full writeup. **Open item
 found during this investigation:** `9154be7`/`4382db7` (an earlier, separate pair of fix attempts
-for this same crash symptom) are not ancestors of `main` — they exist only on the unmerged
-`feat/workflow-branch-discipline` branch, so `main` still lacks their preview multi-mount guard and
-no-reopen-on-rename guard. Not ported over in this round (explicit scope decision); still a latent
+for this same crash symptom) are not ancestors of `main`. They lived only on
+`feat/workflow-branch-discipline`, which was **retired on 2026-07-28** (PR #1 closed unmerged — it
+had fallen ~3,600 lines behind `main` and merging it would have reverted shipped work). `4382db7`
+therefore survives as a bare commit SHA plus the prose description in the follow-up bullet below,
+and `main` still lacks its preview multi-mount guard. Not ported over in this round (explicit scope decision); still a latent
 hazard worth its own follow-up.
 
 **No-camera messaging + fail-safe feature declarations (2026-07-27, branch
@@ -430,9 +432,21 @@ they are recorded now rather than rediscovered later.
       `camera-adapter-authoring` already carries the concrete camera instance in its new §6a. A
       standalone skill would mostly restate both and add a routing decision for the agent to get
       wrong. Deferred deliberately — recorded as future work, not built.
-- [ ] **Port the preview multi-mount and no-reopen-on-rename guards to `main`.** `9154be7` /
-      `4382db7` live only on the unmerged `feat/workflow-branch-discipline` branch (see the rename
-      note near the top of this file). Latent hazard.
+- [ ] **Port the preview multi-mount guard to `main`.** All six tabs stay mounted inside
+      `example/lib/main.dart`'s `IndexedStack`, so the Preview, PTZ, QR and Barcode tabs each build
+      a `CameraStage` → `buildPreview()` and up to four live previews exist at once. On Android
+      that means four camerax **platform views** over one controller (on Windows they are cheap
+      `Texture`s); a rebuild that tears them down together — e.g. a rename firing
+      `notifyListeners()` — can trip the framework's `_dependents.isEmpty` assertion. The guard
+      threads a `bool active` through `CameraStage` / `PreviewTab` / `PtzTab` / `ScannerTab` so
+      only the visible tab builds a preview, using the `active: _index == N` pattern already in
+      `main.dart`. Written as `4382db7` on the retired `feat/workflow-branch-discipline` branch
+      (closed unmerged 2026-07-28); `main` has since rewritten 5 of its 7 files, so this needs
+      **hand-re-application, not a cherry-pick** — the description above is the durable record, the
+      SHA only a pointer. **This is a latent hazard, not a live crash:** its original commit
+      message framed it as the rename fix, but that crash was root-caused elsewhere (see the
+      rename note above) and the 2026-07-28 Android pass did not reproduce this one. Its companion
+      `9154be7` is superseded — it shipped as `0aaf469` via PR #2.
 - [ ] **ONVIF preview connects but the display hangs (intermittent).** Found during the 2026-07-28
       Android hardware pass; **not fixed — deliberate scope decision.** The camera connects, but the
       preview shows a frozen/blank surface; reconnecting — sometimes several times — recovers it.
