@@ -1,7 +1,7 @@
 ---
 title: ONVIF / IP-Camera Setup Guide
-version: 0.3
-last_validated: 2026-07-22
+version: 0.4
+last_validated: 2026-07-28
 official: false
 source: agent-generated
 tags: [onvif, rtsp, ws-discovery, network-permissions, planned]
@@ -11,12 +11,13 @@ estimated_tokens: 700
 
 # ONVIF / IP-camera setup guide (partially implemented — v1.1 in progress)
 
-**Version 0.3** — auth (`open`/`close`/`isOpen`) and media/RTSP preview (`buildPreview`) are
+**Version 0.4** — auth (`open`/`close`/`isOpen`) and media/RTSP preview (`buildPreview`) are
 implemented; discovery, snapshot, and PTZ remain scaffolding (throw `UnimplementedError`).
 
 ## Revision History
 | Version | Date       | Change                          |
 |---------|------------|---------------------------------|
+| 0.4     | 2026-07-28 | Added Troubleshooting: intermittent connect-but-hung preview (known issue, unfixed). |
 | 0.3     | 2026-07-22 | Media service (`GetProfiles`/`GetStreamUri`) + RTSP preview via `media_kit` implemented. |
 | 0.2     | 2026-07-22 | Auth implemented: WS-UsernameToken (PasswordDigest) + HTTP Digest fallback. |
 | 0.1     | 2026-07-18 | Initial stub: network permissions. |
@@ -63,6 +64,23 @@ inbound + outbound UDP 3702. RTSP streams are typically TCP on port 554.
   disposed in `close()` — callers must still call `close()` to release it. A malformed individual
   media profile is skipped rather than failing the whole call; a device reporting zero usable
   profiles, a SOAP `Fault`, or a non-`rtsp://` stream URI all map to the typed error surface.
+
+## Troubleshooting
+
+### The camera connects, but the preview is frozen or blank
+
+**Known issue — not yet fixed** (observed on real hardware, 2026-07-28).
+
+Occasionally `open()` reports success and the UI shows the camera as connected, but the preview
+never renders a moving image. **Workaround: disconnect and reconnect.** It may take more than one
+attempt before the feed comes back; the connection itself is fine, so re-entering credentials or
+re-adding the camera is not necessary.
+
+This is intermittent and does not indicate a misconfigured camera. The likely cause is that
+`open()` currently reports success once playback has been *queued* rather than once a frame has
+actually decoded, so a stalled RTSP session is indistinguishable from a healthy one — see the
+"Follow-ups (not scheduled)" entry in [`ROADMAP.md`](../plan/ROADMAP.md) for the technical detail.
+If you can reproduce it with logs attached, those logs are exactly what the fix is waiting on.
 
 ## Planned behavior (not yet implemented)
 
