@@ -18,8 +18,15 @@ this project's actual paths.
 
 ## Phase 0 — Fixed Invariants (always, first)
 
-- **F1 Git sync.** `git fetch && git pull --rebase`. If the working tree is
-  dirty, **stop and ask** the user how to handle it (continue / stash / commit).
+- **F1 Git sync + branch gate.** `git fetch && git pull --rebase`. If the working
+  tree is dirty, **stop and ask** the user how to handle it (continue / stash /
+  commit). **Before the first intentional code change of a task, make sure you are
+  on a feature branch off an up-to-date `main` — never edit or commit project code
+  directly on `main`.** This holds for **both minor and major** changes (see the
+  change-size table in Phase 2); create the branch with
+  `git switch -c <prefix>/<slug>`. The PostToolUse hook nudges you if you edit
+  source on a protected branch, and the Stop hook blocks a dirty tree with source
+  changes there.
 - **F2 Environment.** For each tool in `env_check.tool_paths`: run
   `<path> <version_flag>` for a version, or — if `version_flag` is `null`/empty —
   only verify the path exists. Report versions or found/not-found. Empty config → skip.
@@ -53,6 +60,15 @@ acceptance criteria including only the necessary process steps. Optionally
 confirm the plan with the user.
 
 ## Phase 2 — Execute
+
+**Branch first (non-negotiable).** All project-code work happens on a feature
+branch off `main`; never commit directly to `main`. Size the git handling to the
+change — but *both* sizes branch:
+
+| Size | Examples | Branch prefix | Rigor |
+|------|----------|---------------|-------|
+| **Minor** | typo/comment, docs-only, small localized fix, config tweak | `fix/<slug>`, `docs/<slug>`, `chore/<slug>` | one focused commit; PR against `main`; the relevant review gate |
+| **Major** | new adapter/backend, contract/API change, refactor, anything that could break the codebase | `feat/<slug>`, `refactor/<slug>` | incremental atomic commits; **both** `code-reviewer` + `security-reviewer` gates; PR against `main`; `flutter analyze --fatal-infos` + `flutter test` green before merge |
 
 For each checklist item: **implement → run linter/formatter/tests → fix
 failures before moving on.** If blocked, log the obstacle, propose an updated
@@ -97,9 +113,17 @@ per the Progressive Disclosure Guide. Full spec: `GUIDE.md` §6.
 - **Final ledger entry:** ensure all session changes are logged; append a
   closure summary.
 - **Update roadmap** if triggered.
-- **Commit & push:** `git add -A && git commit -m "Plan: <slug> – <summary>" && git push`.
+- **Git closure checklist:**
+  ```
+  [ ] On a feature branch off up-to-date main (not main itself)
+  [ ] git add -A            # review `git status` / `git diff --staged` first
+  [ ] git commit -m "<type>: <summary>"     # conventional, atomic
+  [ ] git push -u origin <branch>
+  [ ] Open PR against main (gh pr create --base main, or open the PR manually on GitHub)
+  [ ] Review gate(s) pass on `git diff main...HEAD` (both gates for major changes)
+  ```
 - **Self-check:** not done until `UNFINISHED.md` is cleared, the ledger entry is
-  written, and the commit is pushed.
+  written, and the commit is pushed (on a feature branch, via a PR to `main`).
 
 ---
 
@@ -147,6 +171,12 @@ keep only the latest ≤3 rows + a link in `index.md`. That `CHANGELOG.md` is a 
 peer marked `exclude_from_ai: true`, so it stays out of the active token budget.
 
 ## Contributing improvements upstream
+
+> **Scope:** this section is *only* about contributing fixes to the **workflow
+> tooling itself** (the vendored workflow-core / upstream repo). It is **separate
+> from — and never an exception to** — the "always branch off `main` for project
+> code" rule in Phase 2. The `fix/<desc>` below is a branch in the *upstream*
+> tooling repo, not a licence to commit project code straight to `main`.
 
 When you find a flaw or missing trigger in the workflow itself, classify it and
 log the discovery in the project ledger with a `[workflow]` tag:

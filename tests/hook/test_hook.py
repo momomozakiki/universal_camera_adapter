@@ -506,6 +506,104 @@ class TestF5UpdateCheck(BaseCase):
         self.assertIsNone(notice)
 
 
+class TestBranchDisciplinePostToolUse(BaseCase):
+    """PostToolUse nudge when source is edited on a protected branch."""
+
+    def _on_branch(self, name):
+        # The temp project isn't a git repo; stub the live-branch read.
+        p = mock.patch.object(workflow_hook, "current_branch", lambda root: name)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_source_edit_on_protected_branch_nudges(self):
+        self._on_branch("main")
+        rc, out = run_hook(self.edit_event("src/a.py"), project_dir=self.project)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("protected branch `main`", ctx)
+        self.assertIn("feature branch", ctx)
+        self.assertTrue(workflow_hook.load_state(self.session_id)["branch_nudged"])
+
+    def test_branch_nudge_fires_once(self):
+        self._on_branch("main")
+        run_hook(self.edit_event("src/a.py"), project_dir=self.project)
+        rc, out2 = run_hook(self.edit_event("src/c.py"), project_dir=self.project)
+        # Second source edit: branch already nudged and doc already nudged -> silent.
+        self.assertIsNone(out2)
+
+    def test_source_edit_on_feature_branch_no_branch_nudge(self):
+        self._on_branch("feat/x")
+        rc, out = run_hook(self.edit_event("src/a.py"), project_dir=self.project)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertNotIn("protected branch", ctx)
+        self.assertIn("ledger", ctx.lower())  # only the doc/ledger nudge
+
+    def test_non_source_edit_on_main_no_branch_nudge(self):
+        self._on_branch("main")
+        rc, out = run_hook(self.edit_event("README.md"), project_dir=self.project)
+        self.assertIsNone(out)  # non-source path -> no git read, no branch nudge
+
+    def test_disabled_policy_suppresses_branch_nudge(self):
+        self._on_branch("main")
+        self.write_config({
+            "project_root": ".",
+            "source_directories": ["src"],
+            "documentation_directories": ["docs"],
+            "ledger": {"directory": "history"},
+            "env_check": {"tool_paths": {}},
+            "stop_hook": {"max_blocks": 2, "main_branch": "main"},
+            "branch_policy": {"require_feature_branch": False},
+        })
+        rc, out = run_hook(self.edit_event("src/a.py"), project_dir=self.project)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertNotIn("protected branch", ctx)  # policy off -> ledger nudge only
+
+
+class TestStopBranchDiscipline(BaseCase):
+    """Stop-hook block for uncommitted source changes on a protected branch."""
+
+    def _seed_state(self, **kw):
+        state = workflow_hook.default_state()
+        state.update(kw)
+        workflow_hook.save_state(self.session_id, state)
+
+    def _run_stop_with_status(self, status):
+        orig_git_status = workflow_hook.git_status
+        orig_git = workflow_hook._git
+        workflow_hook.git_status = lambda project_root: status
+        workflow_hook._git = lambda root, *args: (
+            " M src/a.py" if args[:1] == ("status",) else None)
+        try:
+            return run_hook(
+                {"hookEventName": "Stop", "session_id": self.session_id},
+                project_dir=self.project)
+        finally:
+            workflow_hook.git_status = orig_git_status
+            workflow_hook._git = orig_git
+
+    def test_source_dirty_on_main_blocks_with_branch_message(self):
+        # Isolate from the ledger reminder by marking the ledger touched.
+        self._seed_state(source_changed=True, ledger_touched=True)
+        rc, out = self._run_stop_with_status(
+            {"branch": "main", "dirty": True, "ahead": None, "behind": None})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("protected branch `main`", out["reason"])
+        self.assertIn("feature branch", out["reason"])
+
+    def test_docs_only_dirty_on_main_does_not_block(self):
+        self._seed_state(source_changed=False, ledger_touched=True)
+        rc, out = self._run_stop_with_status(
+            {"branch": "main", "dirty": True, "ahead": None, "behind": None})
+        self.assertIsNone(out)  # docs-only on the trunk is exempt
+
+    def test_source_dirty_on_feature_branch_uses_commit_reminder(self):
+        self._seed_state(source_changed=True, ledger_touched=True)
+        rc, out = self._run_stop_with_status(
+            {"branch": "feat/x", "dirty": True, "ahead": None, "behind": None})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("commit & push", out["reason"].lower())
+        self.assertNotIn("should have been a feature branch", out["reason"])
+
+
 class TestDryRun(BaseCase):
     def test_dry_run_does_not_mutate_state(self):
         rc, out = run_hook(self.edit_event("src/a.py"), argv=["--dry-run"],
