@@ -33,6 +33,8 @@ export 'src/onvif/onvif_camera_adapter.dart'
 export 'src/persistence/camera_profile.dart' show CameraProfile;
 export 'src/persistence/camera_profile_store.dart'
     show CameraProfileStore, SharedPreferencesCameraProfileStore;
+export 'src/persistence/camera_restore_guard.dart'
+    show CameraRestoreGuard, SharedPreferencesCameraRestoreGuard;
 export 'src/persistence/camera_secret_store.dart'
     show CameraSecretStore, FlutterSecureStorageCameraSecretStore;
 export 'src/persistence/legacy_prefs_migration.dart'

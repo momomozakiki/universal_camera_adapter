@@ -3,8 +3,9 @@ import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import '../camera_session.dart';
 import '../widgets/camera_bar.dart';
+import '../widgets/camera_empty_state.dart';
 import '../widgets/camera_stage.dart';
-import '../widgets/no_camera.dart';
+import '../widgets/feature_status_chip.dart';
 
 /// Zoom / Pan / Tilt test surface, gated entirely by the open device's
 /// [CameraFeatureMatrix]. Each slider is enabled only when the feature reports
@@ -55,9 +56,10 @@ class _PtzTabState extends State<PtzTab> {
             CameraBar(session: session),
             const SizedBox(height: 12),
             if (!session.isOpen)
-              const NoCameraPlaceholder(
+              const CameraEmptyState(
                 icon: Icons.control_camera_outlined,
-                message: 'Connect a camera to test PTZ controls.',
+                headline: 'Connect a camera to test PTZ controls.',
+                hint: kConnectACameraHint,
               )
             else ...[
               CameraStage(session: session),
@@ -66,22 +68,34 @@ class _PtzTabState extends State<PtzTab> {
             if (session.isOpen) ...[
               _CapabilitySlider(
                 label: 'Zoom',
+                feature: CameraFeature.zoom,
+                // Status now comes from the matrix like every other feature.
+                // This used to key off `capabilities == null`, which was the one
+                // place the tab bypassed the matrix entirely.
+                status: session.statusOf(CameraFeature.zoom),
                 enabled: session.zoomEnabled,
                 value: session.zoom.clamp(zoomRange.min, zoomRange.max),
                 min: zoomRange.min,
                 max: zoomRange.max,
-                unsupportedNote: session.capabilities == null
+                // The numeric range is the one thing the matrix cannot carry,
+                // so it stays the chip's detail in both directions: the span
+                // when there is one, the reason when there is not.
+                detailOverride: session.capabilities == null
                     ? 'This camera does not report a zoom range.'
-                    : 'This camera reports no zoom range.',
+                    : session.zoomEnabled
+                        ? 'Range ${zoomRange.min.toStringAsFixed(1)}×'
+                            '–${zoomRange.max.toStringAsFixed(1)}×.'
+                        : 'This camera reports no zoom range.',
                 onChanged: session.setZoom,
               ),
               _CapabilitySlider(
                 label: 'Pan',
+                feature: CameraFeature.pan,
+                status: session.statusOf(CameraFeature.pan),
                 enabled: session.supports(CameraFeature.pan),
                 value: _pan,
                 min: 0,
                 max: 1,
-                unsupportedNote: 'Pan is not supported by this camera.',
                 onChanged: (v) {
                   setState(() => _pan = v);
                   session.setPan(v);
@@ -89,11 +103,12 @@ class _PtzTabState extends State<PtzTab> {
               ),
               _CapabilitySlider(
                 label: 'Tilt',
+                feature: CameraFeature.tilt,
+                status: session.statusOf(CameraFeature.tilt),
                 enabled: session.supports(CameraFeature.tilt),
                 value: _tilt,
                 min: 0,
                 max: 1,
-                unsupportedNote: 'Tilt is not supported by this camera.',
                 onChanged: (v) {
                   setState(() => _tilt = v);
                   session.setTilt(v);
@@ -107,26 +122,37 @@ class _PtzTabState extends State<PtzTab> {
   }
 }
 
-/// A labelled slider that grays out (with a note) when the capability is absent,
-/// so the capability-driven UI is visibly wired even before a PTZ backend exists.
+/// A labelled slider paired with the feature's tri-state status chip.
+///
+/// The chip renders in **every** state, not just the negative ones: a working
+/// control now confirms it works, and — the reason this changed — a feature the
+/// app has wired but not yet validated reads "Under development" instead of
+/// blaming the camera for not supporting it.
+///
+/// [enabled] stays separate from [status] on purpose. Messaging is tri-state;
+/// interaction is binary, because an `unvalidated` control may still throw.
 class _CapabilitySlider extends StatelessWidget {
   const _CapabilitySlider({
     required this.label,
+    required this.feature,
+    required this.status,
     required this.enabled,
     required this.value,
     required this.min,
     required this.max,
-    required this.unsupportedNote,
     required this.onChanged,
+    this.detailOverride,
   });
 
   final String label;
+  final CameraFeature feature;
+  final CameraFeatureStatus status;
   final bool enabled;
   final double value;
   final double min;
   final double max;
-  final String unsupportedNote;
   final ValueChanged<double> onChanged;
+  final String? detailOverride;
 
   @override
   Widget build(BuildContext context) {
@@ -136,17 +162,12 @@ class _CapabilitySlider extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(label, style: theme.textTheme.titleMedium),
-              const SizedBox(width: 8),
-              if (!enabled)
-                Icon(
-                  Icons.block,
-                  size: 16,
-                  color: theme.colorScheme.outline,
-                ),
-            ],
+          Text(label, style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          FeatureStatusChip(
+            feature: feature,
+            status: status,
+            detailOverride: detailOverride,
           ),
           Slider(
             value: value.clamp(min, max),
@@ -154,8 +175,6 @@ class _CapabilitySlider extends StatelessWidget {
             max: max,
             onChanged: enabled ? onChanged : null,
           ),
-          if (!enabled)
-            Text(unsupportedNote, style: theme.textTheme.bodySmall),
         ],
       ),
     );

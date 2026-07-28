@@ -3,8 +3,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../camera_session.dart';
+import '../error_messages.dart';
 import '../widgets/camera_bar.dart';
-import '../widgets/no_camera.dart';
+import '../widgets/camera_empty_state.dart';
 
 /// Capture-and-collect: tap Capture to append a frame from
 /// [CameraSession.captureFrame] to an in-memory strip of thumbnails (tap one to
@@ -46,7 +47,7 @@ class _GalleryTabState extends State<GalleryTab> {
       setState(() => _shots.insert(0, bytes));
     } on Object catch (e) {
       if (!mounted) return;
-      setState(() => _error = '$e');
+      setState(() => _error = describeCameraError(e, action: 'capturing a frame'));
     } finally {
       if (mounted) setState(() => _capturing = false);
     }
@@ -75,9 +76,10 @@ class _GalleryTabState extends State<GalleryTab> {
         ),
         if (!session.isOpen)
           const Expanded(
-            child: NoCameraPlaceholder(
+            child: CameraEmptyState(
               icon: Icons.photo_library_outlined,
-              message: 'Connect a camera to capture photos.',
+              headline: 'Connect a camera to capture photos.',
+              hint: kConnectACameraHint,
             ),
           )
         else ...[
@@ -112,7 +114,9 @@ class _GalleryTabState extends State<GalleryTab> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              'Capture failed: $_error',
+              // _error is already a complete sentence from describeCameraError;
+              // a "Capture failed:" prefix would say it twice.
+              _error!,
               style: TextStyle(color: theme.colorScheme.error),
             ),
           ),

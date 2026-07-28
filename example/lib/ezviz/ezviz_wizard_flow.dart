@@ -2,6 +2,7 @@ import 'package:ezviz_flutter/ezviz_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
+import '../error_messages.dart';
 import 'ezviz_camera_adapter.dart';
 
 /// Called when the user picks a device. Returning a [Future] lets the flow show
@@ -117,7 +118,10 @@ class _EzvizWizardFlowState extends State<EzvizWizardFlow>
       if (mounted) {
         setState(() {
           _step = _WizardStep.signIn;
-          _error = 'Could not check for a signed-in account: $e';
+          _error = describeCameraError(
+            e,
+            action: 'checking for a signed-in account',
+          );
         });
       }
     }
@@ -162,7 +166,9 @@ class _EzvizWizardFlowState extends State<EzvizWizardFlow>
       // we're on and just surface the error, rather than bouncing the user
       // back to sign-in after a real sign-in success just because this next
       // call timed out.
-      if (mounted) setState(() => _error = 'Could not finish signing in: $e');
+      if (mounted) {
+        setState(() => _error = describeCameraError(e, action: 'signing in'));
+      }
     }
   }
 
@@ -195,7 +201,11 @@ class _EzvizWizardFlowState extends State<EzvizWizardFlow>
       );
       if (mounted) setState(() => _devices = devices);
     } on Object catch (e) {
-      if (mounted) setState(() => _error = 'Could not load devices: $e');
+      if (mounted) {
+        setState(
+          () => _error = describeCameraError(e, action: 'loading your devices'),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -232,7 +242,7 @@ class _EzvizWizardFlowState extends State<EzvizWizardFlow>
       if (!mounted) return;
       setState(() {
         _step = _WizardStep.devices;
-        _error = '$e';
+        _error = describeCameraError(e, action: 'connecting to that camera');
       });
     }
   }

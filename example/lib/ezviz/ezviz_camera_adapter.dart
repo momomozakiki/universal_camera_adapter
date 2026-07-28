@@ -36,12 +36,59 @@ class EzvizCameraAdapter extends CameraAdapter {
   @override
   bool get isOpen => _device != null;
 
+  /// Fetches the cached access token and initialises the native SDK, returning
+  /// the token.
+  ///
+  /// **Every entry point that touches the native SDK must call this first.**
+  /// `EZGlobalSDK.getInstance()` is null until `initSDK` has run, and the
+  /// native `getDeviceList` dereferences it on a background Kotlin coroutine
+  /// whose only `catch` is the EZVIZ SDK's own `BaseException` — so a
+  /// `NullPointerException` there is not caught, escapes the coroutine and
+  /// kills the process as a `FATAL EXCEPTION`. No Dart `try`/`catch` can
+  /// intercept it. This method existing is what keeps that unreachable.
+  ///
+  /// Was previously inline in [open] only, which is exactly how [listDevices]
+  /// came to reach the SDK uninitialised: restoring a saved EZVIZ camera at
+  /// startup enumerates before it opens, so the app died before any UI
+  /// existed. Confirmed on device (CPH2113, Android 12), and reproduced
+  /// identically on the parent commit — this was never a regression, it was
+  /// latent from the day `listDevices` was written.
+  Future<String> _ensureSdk({Duration timeout = kDefaultCameraTimeout}) async {
+    final token = await EzvizAuthManager.getAccessToken().timeout(timeout);
+    if (token == null) {
+      throw StateError(
+        'No signed-in EZVIZ account. Sign in from the camera setup screen '
+        'before using this camera.',
+      );
+    }
+    await EzvizManager.shared()
+        .initSDK(EzvizInitOptions(appKey: appKey, accessToken: token.accessToken))
+        .timeout(timeout);
+    return token.accessToken;
+  }
+
   @override
   Future<List<CameraDevice>> listDevices() async {
-    final devices = await EzvizDeviceManager.getDeviceList().timeout(
-      kDefaultCameraTimeout,
-    );
-    return devices.map(_toCameraDevice).toList(growable: false);
+    try {
+      await _ensureSdk();
+      final devices = await EzvizDeviceManager.getDeviceList().timeout(
+        kDefaultCameraTimeout,
+      );
+      return devices.map(_toCameraDevice).toList(growable: false);
+    } on StateError {
+      // Already on the documented typed surface, carrying a written message
+      // (the no-account case above) — pass it through rather than flattening.
+      rethrow;
+    } on TimeoutException {
+      rethrow;
+    } on Object {
+      // Nothing untyped escapes the contract, whatever the plugin throws —
+      // including the native SDK_NOT_INITIALIZED PlatformException. Mirrors
+      // the ladder in FlutterCameraAdapter.listDevices. The message is
+      // authored here and never reads platform text, so no stack trace can
+      // reach a screen.
+      throw StateError('Could not list EZVIZ cameras. Please try again.');
+    }
   }
 
   CameraDevice _toCameraDevice(EzvizDeviceInfo info) => CameraDevice(
@@ -61,17 +108,7 @@ class EzvizCameraAdapter extends CameraAdapter {
     Duration timeout = kDefaultCameraTimeout,
   }) async {
     await close();
-    final token = await EzvizAuthManager.getAccessToken().timeout(timeout);
-    if (token == null) {
-      throw StateError(
-        'No signed-in EZVIZ account. Call EzvizAuthManager.openLoginPage() '
-        'and complete sign-in before opening an EZVIZ device.',
-      );
-    }
-    await EzvizManager.shared()
-        .initSDK(EzvizInitOptions(appKey: appKey, accessToken: token.accessToken))
-        .timeout(timeout);
-    _accessToken = token.accessToken;
+    _accessToken = await _ensureSdk(timeout: timeout);
     _verificationCode = device.metadata['verificationCode'] as String?;
     _device = device;
   }
@@ -109,21 +146,26 @@ class EzvizCameraAdapter extends CameraAdapter {
     return const CameraCapabilities();
   }
 
+  /// The integration checklist for the EZVIZ backend.
+  ///
+  /// The vendored plugin's native `capturePicture` is a stub (see
+  /// [captureFrame]), so frame capture — and the scanning features built on it
+  /// — are `unvalidated`, not `supported`, until that native patch lands. This
+  /// is the live "Under development" case the tri-state messaging exists for:
+  /// the app has wired these, the camera is not at fault.
   @override
-  CameraFeatureMatrix get featureMatrix {
-    // Reuse the base derivation (zoom/pan/tilt from [capabilities], which also
-    // enforces the open-state check), then downgrade the features that aren't
-    // wired yet: the vendored plugin's native capturePicture is a stub (see
-    // [captureFrame]), so frame capture — and the scanning features built on
-    // it — are unvalidated, not supported, until that native patch lands.
-    return super.featureMatrix.withStatuses(
+  Map<CameraFeature, CameraFeatureStatus> get declaredFeatures =>
       const <CameraFeature, CameraFeatureStatus>{
+        CameraFeature.zoom: CameraFeatureStatus.unsupported,
+        CameraFeature.pan: CameraFeatureStatus.unsupported,
+        CameraFeature.tilt: CameraFeatureStatus.unsupported,
         CameraFeature.frameCapture: CameraFeatureStatus.unvalidated,
         CameraFeature.qrScanning: CameraFeatureStatus.unvalidated,
         CameraFeature.barcodeScanning: CameraFeatureStatus.unvalidated,
-      },
-    );
-  }
+        CameraFeature.textRecognitionOcr: CameraFeatureStatus.unvalidated,
+        CameraFeature.twoWayAudio: CameraFeatureStatus.unvalidated,
+        CameraFeature.motionEvents: CameraFeatureStatus.unvalidated,
+      };
 
   @override
   Widget buildPreview() {

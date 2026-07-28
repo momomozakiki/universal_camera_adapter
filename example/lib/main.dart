@@ -10,6 +10,7 @@ import 'setup/ezviz_setup_wizard.dart';
 import 'setup/onvif_setup_wizard.dart';
 import 'tabs/barcode_scanner_tab.dart';
 import 'tabs/cameras_tab.dart';
+import 'tabs/features_tab.dart';
 import 'tabs/gallery_tab.dart';
 import 'tabs/preview_tab.dart';
 import 'tabs/ptz_tab.dart';
@@ -97,6 +98,9 @@ Future<void> main() async {
   final registry = buildRegistry();
   final profileStore = SharedPreferencesCameraProfileStore();
   final secretStore = FlutterSecureStorageCameraSecretStore();
+  // Without this, a backend that kills the process during startup restore makes
+  // the app unlaunchable — see CameraRestoreGuard.
+  final restoreGuard = SharedPreferencesCameraRestoreGuard();
 
   // Before the session loads profiles, so an imported camera is visible on the
   // very first frame rather than after a restart.
@@ -110,6 +114,7 @@ Future<void> main() async {
       registry: registry,
       profileStore: profileStore,
       secretStore: secretStore,
+      restoreGuard: restoreGuard,
       wizards: buildWizardRegistry(
         registry: registry,
         secretStore: secretStore,
@@ -124,12 +129,14 @@ class ExampleApp extends StatelessWidget {
     required this.registry,
     required this.profileStore,
     required this.secretStore,
+    required this.restoreGuard,
     required this.wizards,
   });
 
   final CameraAdapterRegistry registry;
   final CameraProfileStore profileStore;
   final CameraSecretStore secretStore;
+  final CameraRestoreGuard restoreGuard;
   final CameraSetupWizardRegistry wizards;
 
   @override
@@ -141,6 +148,7 @@ class ExampleApp extends StatelessWidget {
         registry: registry,
         profileStore: profileStore,
         secretStore: secretStore,
+        restoreGuard: restoreGuard,
         wizards: wizards,
       ),
     );
@@ -157,12 +165,14 @@ class CameraToolkitPage extends StatefulWidget {
     required this.registry,
     required this.profileStore,
     required this.secretStore,
+    required this.restoreGuard,
     required this.wizards,
   });
 
   final CameraAdapterRegistry registry;
   final CameraProfileStore profileStore;
   final CameraSecretStore secretStore;
+  final CameraRestoreGuard restoreGuard;
   final CameraSetupWizardRegistry wizards;
 
   @override
@@ -174,6 +184,7 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
     widget.registry,
     profileStore: widget.profileStore,
     secretStore: widget.secretStore,
+    restoreGuard: widget.restoreGuard,
   );
 
   int _index = 0;
@@ -185,6 +196,7 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
     'Barcode scanner',
     'Gallery',
     'PTZ / Zoom',
+    'Features',
   ];
 
   @override
@@ -213,6 +225,7 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
       BarcodeScannerTab(session: _session, active: _index == 3),
       GalleryTab(session: _session),
       PtzTab(session: _session),
+      FeaturesTab(session: _session),
     ];
 
     return Scaffold(
@@ -258,6 +271,11 @@ class _CameraToolkitPageState extends State<CameraToolkitPage> {
             icon: Icon(Icons.control_camera_outlined),
             selectedIcon: Icon(Icons.control_camera),
             label: 'PTZ',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.fact_check_outlined),
+            selectedIcon: Icon(Icons.fact_check),
+            label: 'Features',
           ),
         ],
       ),

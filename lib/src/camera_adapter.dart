@@ -58,6 +58,26 @@ abstract class CameraAdapter {
   /// What the *opened* device can do. Throws [StateError] if not open.
   CameraCapabilities get capabilities;
 
+  /// What this backend *claims* about each [CameraFeature], independent of any
+  /// open device.
+  ///
+  /// This is the integration checklist for a new camera plugin: state a status
+  /// for every [CameraFeature] you have looked at. It is readable without
+  /// hardware — no `open()`, no permissions — which is what lets
+  /// `camera_feature_checklist_test.dart` enforce that a registered backend has
+  /// declared all of them rather than silently inheriting defaults.
+  ///
+  /// Concrete with an empty default so adding this never broke an existing
+  /// implementer; the checklist test is what makes leaving it empty visible.
+  /// Entries here are layered over the queried derivation in [featureMatrix],
+  /// so this stays the single place a claim is written.
+  ///
+  /// Declare `supported` **only** for what has been exercised on real hardware.
+  /// Anything wired but unproven is [CameraFeatureStatus.unvalidated], which
+  /// reads as "Under development" in the UI and stays non-interactive.
+  Map<CameraFeature, CameraFeatureStatus> get declaredFeatures =>
+      const <CameraFeature, CameraFeatureStatus>{};
+
   /// The tri-state support of every [CameraFeature] for the opened device.
   ///
   /// This is the feature surface consumers should prefer: a feature queries its
@@ -65,17 +85,28 @@ abstract class CameraAdapter {
   /// [CameraFeatureStatus.supported], so adding a feature never forces an edit
   /// to this contract or to every backend (Open/Closed).
   ///
-  /// The default derivation maps [capabilities] onto zoom/pan/tilt and assumes
-  /// the generic primitives are available — and is deliberately **optimistic**:
-  /// [CameraFeature.frameCapture] and the scanning features default to
-  /// [CameraFeatureStatus.supported] because [captureFrame] is a required
-  /// contract method. **A backend whose [captureFrame] is not actually wired
-  /// (i.e. it throws) MUST override this getter** to downgrade `frameCapture`
-  /// and the scanning features to [CameraFeatureStatus.unvalidated] /
-  /// [CameraFeatureStatus.unsupported] — otherwise it inherits a false positive.
-  /// A backend may reuse this base result and adjust a few entries via
-  /// [CameraFeatureMatrix.override] (see `EzvizCameraAdapter`), or build its own
-  /// matrix when it can't read [capabilities] (see `ONVIFCameraAdapter`).
+  /// The default derivation maps [capabilities] onto zoom/pan/tilt — which are
+  /// genuinely *queried* — and **fails safe** for everything else.
+  ///
+  /// This derivation used to be optimistic: `frameCapture` and the scanning
+  /// features defaulted to [CameraFeatureStatus.supported] on the reasoning that
+  /// [captureFrame] is a required contract method, with a doc note telling
+  /// authors they "MUST override" to downgrade. That is opt-out, and it fails
+  /// open — a backend that simply forgot inherited a claim its hardware could
+  /// not honour, and the user was told the *camera* lacked a feature the *app*
+  /// had not finished wiring.
+  ///
+  /// They now default to [CameraFeatureStatus.unvalidated] instead: an
+  /// undeclared feature is unknown, not proven. Nothing is enabled on an
+  /// unproven claim, because `isSupported` remains `false` for `unvalidated`
+  /// — but the UI can say "Under development" rather than "Not supported".
+  ///
+  /// **A backend that has verified a feature on real hardware must therefore
+  /// declare it explicitly** — see [FlutterCameraAdapter], which promotes the
+  /// three primitives it has tested. Reuse this base result and adjust entries
+  /// via [CameraFeatureMatrix.withStatuses] (see `EzvizCameraAdapter`), or build
+  /// a matrix outright when [capabilities] is unreadable (see
+  /// `ONVIFCameraAdapter`).
   ///
   /// Like [capabilities], this is a post-open query — the default derivation
   /// reads [capabilities] and therefore throws [StateError] if not open.
@@ -91,13 +122,15 @@ abstract class CameraAdapter {
       CameraFeature.tilt: caps.hasTilt
           ? CameraFeatureStatus.supported
           : CameraFeatureStatus.unsupported,
-      CameraFeature.frameCapture: CameraFeatureStatus.supported,
-      CameraFeature.qrScanning: CameraFeatureStatus.supported,
-      CameraFeature.barcodeScanning: CameraFeatureStatus.supported,
+      CameraFeature.frameCapture: CameraFeatureStatus.unvalidated,
+      CameraFeature.qrScanning: CameraFeatureStatus.unvalidated,
+      CameraFeature.barcodeScanning: CameraFeatureStatus.unvalidated,
       CameraFeature.textRecognitionOcr: CameraFeatureStatus.unvalidated,
       CameraFeature.twoWayAudio: CameraFeatureStatus.unvalidated,
       CameraFeature.motionEvents: CameraFeatureStatus.unvalidated,
-    });
+      // Layered last so a backend's declaration wins over the fail-safe
+      // defaults — and so [declaredFeatures] stays the one place a claim lives.
+    }).withStatuses(declaredFeatures);
   }
 
   // --- Video ---

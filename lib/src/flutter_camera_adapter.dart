@@ -3,10 +3,13 @@ import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter/widgets.dart';
 
 import 'camera_adapter.dart';
+import 'camera_feature.dart';
 import 'camera_types.dart';
+import 'plugin_error_mapping.dart';
 
 /// Local-device camera backend, wrapping the federated `camera` plugin
 /// (`camera_android` on Android, `camera_windows` on Windows).
@@ -51,8 +54,23 @@ class FlutterCameraAdapter extends CameraAdapter {
                 },
               ))
           .toList(growable: false);
+    } on TimeoutException {
+      // Part of the documented typed surface — pass it through untouched
+      // rather than flattening it into a StateError.
+      rethrow;
     } on CameraException catch (e) {
-      throw StateError('Failed to list cameras: ${e.code} ${e.description ?? ''}'.trim());
+      if (meansNoCamera(e)) return const <CameraDevice>[];
+      throw StateError(describePluginFailure(e, 'list cameras'));
+    } on PlatformException catch (e) {
+      // Android only: camera_android_camerax's availableCameras() has no
+      // try/catch, so a CameraX failure arrives raw here. "No camera" is an
+      // empty list, not an error — CameraX's own advice for this state is to
+      // retry, which is exactly what a Refresh does.
+      if (meansNoCamera(e)) return const <CameraDevice>[];
+      throw StateError(describePluginFailure(e, 'list cameras'));
+    } on Object catch (e) {
+      // Nothing untyped escapes the contract, whatever the plugin throws.
+      throw StateError(describePluginFailure(e, 'list cameras'));
     }
   }
 
@@ -80,6 +98,12 @@ class FlutterCameraAdapter extends CameraAdapter {
     } on CameraException catch (e) {
       await _safeDispose(controller);
       throw StateError(_openErrorMessage(e));
+    } on PlatformException catch (e) {
+      await _safeDispose(controller);
+      throw StateError(_openErrorMessage(e));
+    } on Object catch (e) {
+      await _safeDispose(controller);
+      throw StateError(describePluginFailure(e, 'open the camera'));
     }
 
     _controller = controller;
@@ -112,6 +136,43 @@ class FlutterCameraAdapter extends CameraAdapter {
     return CameraPreview(controller);
   }
 
+  /// The integration checklist for this backend — every [CameraFeature] stated.
+  ///
+  /// The base derivation fails safe (undeclared ⇒ `unvalidated`), so a working
+  /// feature has to be *claimed*. `frameCapture` is a real `takePicture()` call
+  /// exercised on both supported platforms and the scanning features are built
+  /// on it, so those three are `supported`. Zoom is listed as `unvalidated`
+  /// here only as a floor: [featureMatrix] overlays the *queried* min/max from
+  /// [capabilities], which is the real answer and may raise or lower it.
+  /// Pan/tilt are `unsupported` — the plugin has no PTZ API at all.
+  @override
+  Map<CameraFeature, CameraFeatureStatus> get declaredFeatures =>
+      const <CameraFeature, CameraFeatureStatus>{
+        CameraFeature.zoom: CameraFeatureStatus.unvalidated,
+        CameraFeature.pan: CameraFeatureStatus.unsupported,
+        CameraFeature.tilt: CameraFeatureStatus.unsupported,
+        CameraFeature.frameCapture: CameraFeatureStatus.supported,
+        CameraFeature.qrScanning: CameraFeatureStatus.supported,
+        CameraFeature.barcodeScanning: CameraFeatureStatus.supported,
+        CameraFeature.textRecognitionOcr: CameraFeatureStatus.unvalidated,
+        CameraFeature.twoWayAudio: CameraFeatureStatus.unsupported,
+        CameraFeature.motionEvents: CameraFeatureStatus.unsupported,
+      };
+
+  /// Zoom/pan/tilt come from the *queried* device, so they must win over the
+  /// static [declaredFeatures] floor — the base getter applies the declaration
+  /// last, which would pin zoom to `unvalidated` even on a camera that reports
+  /// a real range.
+  @override
+  CameraFeatureMatrix get featureMatrix {
+    final caps = capabilities; // throws StateError if not open — intentional.
+    return super.featureMatrix.withStatuses(<CameraFeature, CameraFeatureStatus>{
+      CameraFeature.zoom: caps.hasZoom
+          ? CameraFeatureStatus.supported
+          : CameraFeatureStatus.unsupported,
+    });
+  }
+
   @override
   Future<Uint8List> captureFrame({
     Duration timeout = kDefaultCameraTimeout,
@@ -126,8 +187,10 @@ class FlutterCameraAdapter extends CameraAdapter {
       final budget = timeout < _captureHangGuard ? timeout : _captureHangGuard;
       final XFile file = await controller.takePicture().timeout(budget);
       return await file.readAsBytes();
-    } on CameraException catch (e) {
-      throw StateError('Capture failed: ${e.code} ${e.description ?? ''}'.trim());
+    } on TimeoutException {
+      rethrow;
+    } on Object catch (e) {
+      throw StateError(describePluginFailure(e, 'capture a frame'));
     } finally {
       _capturing = false;
     }
@@ -146,8 +209,10 @@ class FlutterCameraAdapter extends CameraAdapter {
         factor.clamp(_capabilities.minZoomLevel, _capabilities.maxZoomLevel).toDouble();
     try {
       await controller.setZoomLevel(clamped).timeout(timeout);
-    } on CameraException catch (e) {
-      throw StateError('Set zoom failed: ${e.code} ${e.description ?? ''}'.trim());
+    } on TimeoutException {
+      rethrow;
+    } on Object catch (e) {
+      throw StateError(describePluginFailure(e, 'set the zoom level'));
     }
   }
 
@@ -168,8 +233,14 @@ class FlutterCameraAdapter extends CameraAdapter {
     final List<CameraDescription> cameras;
     try {
       cameras = await availableCameras();
-    } on CameraException catch (e) {
-      throw StateError('Failed to enumerate cameras: ${e.code}');
+    } on TimeoutException {
+      rethrow;
+    } on Object catch (e) {
+      // Covers CameraException, the bare PlatformException the Android backend
+      // can throw here, and anything else. A "no camera at all" result is not
+      // special-cased: the requested device is gone either way, and the message
+      // below already says so precisely.
+      throw StateError(describePluginFailure(e, 'find that camera'));
     }
     for (final c in cameras) {
       if (c.name == device.id) return c;
@@ -207,15 +278,28 @@ class FlutterCameraAdapter extends CameraAdapter {
     }
   }
 
-  String _openErrorMessage(CameraException e) {
-    final base = 'Failed to open camera: ${e.code} ${e.description ?? ''}'.trim();
-    final denied = e.code.toLowerCase().contains('denied') ||
-        e.code.toLowerCase().contains('permission');
-    if (denied && Platform.isWindows) {
-      return '$base\nIf the camera is disabled in Windows privacy settings, enable it under '
-          'Settings → Privacy & security → Camera → "Let desktop apps access your camera".';
+  /// A user-safe message for a failed [open].
+  ///
+  /// Permission is detected by an **exact** platform error code, not by
+  /// searching the text for "denied" — both platforms emit the same
+  /// `CameraAccessDenied` constant (see [kPermissionDeniedCodes]), and the
+  /// message itself is never user-safe to echo.
+  String _openErrorMessage(Object e) {
+    if (!meansPermissionDenied(e)) {
+      return describePluginFailure(e, 'open the camera');
     }
-    return base;
+    logPluginFailure(e, 'open the camera');
+    const base = 'Camera access is blocked.';
+    if (Platform.isWindows) {
+      return '$base Enable it under Settings → Privacy & security → Camera → '
+          '"Let desktop apps access your camera", then try again.';
+    }
+    if (Platform.isAndroid) {
+      return '$base Allow the camera permission in Settings → Apps → '
+          'this app → Permissions, then try again.';
+    }
+    return '$base Allow the camera permission in your system settings, then '
+        'try again.';
   }
 
   Future<void> _safeDispose(CameraController controller) async {

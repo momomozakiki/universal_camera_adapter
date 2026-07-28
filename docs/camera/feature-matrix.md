@@ -1,6 +1,6 @@
 ---
 title: Camera Feature Matrix Model
-version: 1.3
+version: 1.4
 last_validated: 2026-07-23
 official: true
 source: project-internal
@@ -18,6 +18,7 @@ applies_when: "Building a UI to display/query camera capabilities or implementin
 | 1.0     | 2026-07-22 | Initial. |
 | 1.1     | 2026-07-23 | Implemented in Epic 2.5 Phase A (`8a390ee`). Recorded the actual derivation direction (matrix derived *from* `CameraCapabilities`, for backward compatibility) and the future `frameStream` throughput ceiling for scanning. |
 | 1.3     | 2026-07-23 | **Marked `official`** — the model is implemented, exercised by the example app's feature tabs, and covered by `test/camera_feature_matrix_test.dart` (base derivation, override path, and the post-open `StateError` contract, via `MockCameraAdapter`). Recorded the consequence that made the matrix load-bearing rather than advisory: `CameraSession.capabilities` is now **nullable**, because `ONVIFCameraAdapter.capabilities` throws `UnimplementedError` and three UI call sites assumed otherwise (`08d9ec8`). The matrix is the mandatory feature surface; `CameraCapabilities` is optional numeric detail. |
+| 1.4     | 2026-07-27 | **The default flipped from optimistic to fail-safe, and the UI finally renders the middle state.** (1) `featureMatrix` no longer defaults `frameCapture`/`qrScanning`/`barcodeScanning` to `supported`, and `fromStatuses`'s `fallback` moved from `unsupported` to `unvalidated` — undeclared means *unknown*, not *proven absent*. (2) New `CameraAdapter.declaredFeatures`: the one place a backend states a status per feature, readable without opening a device, enforced by `example/test/camera_feature_checklist_test.dart`. (3) Fixed the reason the tri-state model was invisible: every UI consumer went through `CameraSession.supports()` → `isSupported()`, which returns `false` for `unvalidated`, so "wired but unproven" rendered identically to "this hardware cannot". EZVIZ's `unvalidated` frame capture therefore told users the *camera* could not capture. `CameraSession.statusOf` + `FeatureStatusChip` now carry the three states; `supports()` still gates *interaction* (an `unvalidated` control may genuinely throw). See the vocabulary section below. |
 | 1.2     | 2026-07-23 | Two as-built corrections found by spec review. (1) "Contract change" claimed `featureMatrix` is a **required** getter every backend must implement — it is concrete and optional to override. (2) The EZVIZ entry claimed PTZ is **queried at runtime**; the shipped adapter deliberately reports all-false and refuses to read `isSupportPTZ`. Also added a `withStatuses` override example, a note that `unvalidated` is transitional, and this versioning note. |
 
 > **Spec version vs. code version.** This document is versioned independently of the package. Each
@@ -401,6 +402,32 @@ already carry a tri-state status and are gated behind `frameCapture`; a backend 
 stream simply reports them `supported`, and one that lacks it keeps reporting `unvalidated`. Recorded
 here so the limitation is a known design boundary rather than a surprise discovered during scanner
 performance work.
+
+## User-facing vocabulary (v1.4)
+
+The three statuses have exactly one set of words in the UI, in
+`example/lib/feature_messages.dart`. Docs, the generated
+[`feature-support.md`](feature-support.md) table and every screen use the same three, so a user never
+sees the same state described two ways.
+
+| Status | Shown as | Detail | Interactive? |
+|---|---|---|---|
+| `supported` | **Available** | "Tested and working on this camera." | Yes |
+| `unvalidated` | **Under development** | "…wired up but not yet confirmed on this camera, so it stays disabled for now." | **No** |
+| `unsupported` | **Not supported** | "This camera does not have \<feature\>." | No |
+
+Two rules make this work, and both are easy to get wrong:
+
+1. **Messaging is tri-state; enablement stays binary.** `CameraSession.statusOf` describes,
+   `CameraSession.supports` gates. An `unvalidated` control must stay disabled — EZVIZ's
+   `unvalidated` `frameCapture` genuinely throws — so the chip explains *why* it is disabled rather
+   than misreporting the feature as absent.
+2. **"Under development" blames the app, never the camera.** That is the whole distinction being
+   drawn. Wording like "this camera cannot…" for an `unvalidated` feature is a bug; the old scanner
+   tab did exactly that, and `example/test/feature_messages_test.dart` now asserts against it.
+
+The positive state is shown too. Previously a working feature rendered a bare control with no label,
+which made "working" and "silently broken" look identical.
 
 ## Risks and open questions
 

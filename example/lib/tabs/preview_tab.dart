@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../camera_session.dart';
+import '../error_messages.dart';
 import '../widgets/camera_bar.dart';
 import '../widgets/camera_stage.dart';
 
@@ -78,7 +79,11 @@ class PreviewTab extends StatelessWidget {
         SnackBar(content: Text('Captured ${bytes.length} bytes.')),
       );
     } on Object catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Capture failed: $e')));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(describeCameraError(e, action: 'capturing a frame')),
+        ),
+      );
     }
   }
 }

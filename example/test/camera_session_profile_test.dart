@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 import 'package:universal_camera_adapter_example/camera_session.dart';
+import 'package:universal_camera_adapter_example/error_messages.dart';
 
 /// Records the device it was actually opened with, so the transient
 /// secret-merge can be asserted from the adapter's side.
@@ -90,6 +91,32 @@ class _FakeProfileStore implements CameraProfileStore {
   }
 }
 
+/// Records the guard calls so the ordering contract can be asserted — the mark
+/// must be durable *before* the risky work, and cleared however it ends.
+class _FakeRestoreGuard implements CameraRestoreGuard {
+  _FakeRestoreGuard({this.interrupted = false});
+
+  /// Simulates a previous launch that died mid-restore.
+  bool interrupted;
+
+  final List<String> calls = <String>[];
+
+  @override
+  Future<bool> wasRestoreInterrupted() async {
+    calls.add('was');
+    return interrupted;
+  }
+
+  @override
+  Future<void> beginRestore() async => calls.add('begin');
+
+  @override
+  Future<void> endRestore() async {
+    calls.add('end');
+    interrupted = false;
+  }
+}
+
 class _FakeSecretStore implements CameraSecretStore {
   final Map<String, String> secrets = <String, String>{};
 
@@ -146,7 +173,11 @@ void main() {
       expect(session.isOpen, isTrue);
     });
 
-    test('falls back to the most recent when nothing is flagged', () async {
+    test('opens NOTHING when no profile is flagged default', () async {
+      // The inverse of the old "most recent wins" fallback, which was removed:
+      // it meant merely *adding* a camera changed what opened at next launch.
+      // A newly-added EZVIZ camera promoted itself into the startup path that
+      // way and made the app unlaunchable.
       final adapter = _RecordingAdapter(const [
         CameraDevice(id: 'dev-old', name: 'Old'),
         CameraDevice(id: 'dev-new', name: 'New'),
@@ -161,7 +192,11 @@ void main() {
       final session = CameraSession(registry, profileStore: store);
       await session.restore();
 
-      expect(session.activeProfile?.id, 'new');
+      expect(session.activeProfile, isNull);
+      expect(adapter.openedWith, isNull, reason: 'nothing may be auto-opened');
+      // Falls through to live discovery, so the user lands on a usable list.
+      expect(session.devices, hasLength(2));
+      expect(session.profiles, hasLength(2));
     });
 
     test('an empty store falls back to live discovery and persists nothing',
@@ -198,6 +233,109 @@ void main() {
 
       expect(session.profiles, isEmpty);
       expect(session.devices, hasLength(1));
+    });
+  });
+
+  group('CameraSession — restore crash-loop guard', () {
+    /// A default profile plus a wired-up session, the fixture every test here
+    /// needs. Returns the parts each assertion reaches into.
+    ({CameraSession session, _RecordingAdapter adapter, _FakeRestoreGuard guard})
+        harness({bool interrupted = false, bool failOpen = false}) {
+      final adapter = _RecordingAdapter(
+        const [CameraDevice(id: 'dev-a', name: 'A')],
+        failOpen: failOpen,
+      );
+      final registry = CameraAdapterRegistry()
+        ..register('builtin', () => adapter, asDefault: true);
+      final guard = _FakeRestoreGuard(interrupted: interrupted);
+      final session = CameraSession(
+        registry,
+        profileStore: _FakeProfileStore([profile(id: 'a', isDefault: true)]),
+        restoreGuard: guard,
+      );
+      return (session: session, adapter: adapter, guard: guard);
+    }
+
+    test('a clean restore marks, opens, and clears', () async {
+      final h = harness();
+      await h.session.restore();
+
+      // begin must precede the open: the mark has to be on disk before the
+      // call that might kill the process, or it proves nothing.
+      expect(h.guard.calls, ['was', 'begin', 'end']);
+      expect(h.session.activeProfile?.id, 'a');
+      expect(h.adapter.openedWith?.id, 'dev-a');
+    });
+
+    test('an interrupted restore skips the auto-open and explains why',
+        () async {
+      final h = harness(interrupted: true);
+      await h.session.restore();
+
+      expect(h.adapter.openedWith, isNull,
+          reason: 'the camera that killed the last launch must not reopen');
+      expect(h.session.activeProfile, isNull);
+      expect(h.session.error, kRestoreSkippedAfterCrash);
+      // Still lands on a usable camera list — the whole point is reaching UI
+      // from which the offending camera can be removed.
+      expect(h.session.devices, hasLength(1));
+    });
+
+    test('the skip is one-shot: the mark is cleared, never re-armed', () async {
+      final h = harness(interrupted: true);
+      await h.session.restore();
+
+      expect(h.guard.calls, ['was', 'end']);
+      expect(await h.guard.wasRestoreInterrupted(), isFalse);
+    });
+
+    test('a Dart-level open failure still clears the mark', () async {
+      // Only process death may trip the guard. An ordinary failed connect is
+      // already handled by the typed error surface, and must not suppress the
+      // next launch's restore.
+      final h = harness(failOpen: true);
+      await h.session.restore();
+
+      expect(h.guard.calls, ['was', 'begin', 'end']);
+      expect(h.session.isOpen, isFalse);
+      // The mark is down, so the *next* launch restores normally rather than
+      // inheriting a skip it did not earn.
+      expect(await h.guard.wasRestoreInterrupted(), isFalse);
+    });
+
+    test('no default profile means the guard is never armed', () async {
+      final adapter = _RecordingAdapter(const [
+        CameraDevice(id: 'dev-a', name: 'A'),
+      ]);
+      final registry = CameraAdapterRegistry()
+        ..register('builtin', () => adapter, asDefault: true);
+      final guard = _FakeRestoreGuard();
+      final session = CameraSession(
+        registry,
+        profileStore: _FakeProfileStore([profile(id: 'a')]),
+        restoreGuard: guard,
+      );
+
+      await session.restore();
+
+      expect(guard.calls, ['was'], reason: 'nothing risky ran, nothing to mark');
+    });
+
+    test('without a guard, restore behaves exactly as before', () async {
+      final adapter = _RecordingAdapter(const [
+        CameraDevice(id: 'dev-a', name: 'A'),
+      ]);
+      final registry = CameraAdapterRegistry()
+        ..register('builtin', () => adapter, asDefault: true);
+      final session = CameraSession(
+        registry,
+        profileStore: _FakeProfileStore([profile(id: 'a', isDefault: true)]),
+      );
+
+      await session.restore();
+
+      expect(session.activeProfile?.id, 'a');
+      expect(session.error, isNull);
     });
   });
 
@@ -449,7 +587,8 @@ void main() {
       ]);
       final registry = CameraAdapterRegistry()
         ..register('builtin', () => adapter, asDefault: true);
-      final store = _FakeProfileStore([profile(id: 'p1')]);
+      // Explicitly default: restore() no longer opens an unflagged profile.
+      final store = _FakeProfileStore([profile(id: 'p1', isDefault: true)]);
 
       final session = CameraSession(registry, profileStore: store);
       await session.restore();

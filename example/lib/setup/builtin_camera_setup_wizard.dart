@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:universal_camera_adapter/universal_camera_adapter.dart';
 
 import '../adapter_types.dart';
+import '../error_messages.dart';
+import '../widgets/camera_empty_state.dart';
 
 /// Setup flow for local device cameras (phone cameras, USB webcams).
 ///
@@ -57,10 +59,32 @@ class _BuiltinDevicePicker extends StatefulWidget {
   State<_BuiltinDevicePicker> createState() => _BuiltinDevicePickerState();
 }
 
+/// Why the picker has nothing to offer — drives which hint the user sees.
+///
+/// Kept separate from the message itself so the *cause* survives into `build`;
+/// a bare `String? _error` could only ever produce one hint.
+///
+/// Deliberately **not** carrying a `permission` case. A blocked permission
+/// arrives as a [StateError] whose message the adapter already tailored to the
+/// platform ("Settings → Privacy & security → Camera" on Windows, "Settings →
+/// Apps → Permissions" on Android). Re-detecting it here would mean matching on
+/// that message text — the same brittle substring coupling this change removed
+/// from the adapter. The layer that knows the cause writes the words; this
+/// layer shows them.
+enum _Cause {
+  /// Enumeration succeeded and returned nothing.
+  empty,
+
+  /// Enumeration failed; [_BuiltinDevicePickerState._error] carries the
+  /// adapter's written explanation, permission-related or not.
+  failure,
+}
+
 class _BuiltinDevicePickerState extends State<_BuiltinDevicePicker> {
   List<CameraDevice> _devices = const <CameraDevice>[];
   bool _busy = true;
   String? _error;
+  _Cause _cause = _Cause.empty;
 
   /// Guards the "exactly one callback, exactly once" invariant.
   bool _finished = false;
@@ -87,24 +111,45 @@ class _BuiltinDevicePickerState extends State<_BuiltinDevicePicker> {
       setState(() {
         _devices = devices;
         _busy = false;
-        _error = devices.isEmpty ? 'No camera was found on this device.' : null;
+        _error = null;
+        _cause = _Cause.empty;
       });
     } on TimeoutException {
-      _fail('The camera list took too long to load.');
+      _fail('The camera list took too long to load.', _Cause.failure);
     } on StateError catch (e) {
-      // Includes permission denied.
-      _fail(e.message);
+      // The adapter has already replaced any platform text with a written
+      // message — including the platform-specific permission instructions —
+      // so this is safe to show verbatim.
+      _fail(e.message, _Cause.failure);
     } on Object catch (e) {
-      _fail('$e');
+      // Off-contract: describeCameraError logs it and returns a written
+      // sentence, so nothing of the raw object reaches the screen.
+      _fail(
+        describeCameraError(e, action: 'looking for cameras'),
+        _Cause.failure,
+      );
     }
   }
 
-  void _fail(String message) {
+  void _fail(String message, _Cause cause) {
     if (!mounted) return;
     setState(() {
       _busy = false;
       _error = message;
+      _cause = cause;
     });
+  }
+
+  /// What the user can actually do, per cause.
+  String get _hint {
+    switch (_cause) {
+      case _Cause.empty:
+        return "This device doesn't report a camera. If one is attached, "
+            'reconnect it and tap Refresh.';
+      case _Cause.failure:
+        return '${_error ?? 'The camera list could not be loaded.'} '
+            'Tap Refresh to try again.';
+    }
   }
 
   void _choose(CameraDevice device) {
@@ -133,14 +178,10 @@ class _BuiltinDevicePickerState extends State<_BuiltinDevicePicker> {
           child: _busy
               ? const Center(child: CircularProgressIndicator())
               : _devices.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          _error ?? 'No camera was found on this device.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
+                  ? CameraEmptyState(
+                      icon: Icons.no_photography_outlined,
+                      headline: kNoBuiltinCameraFound,
+                      hint: _hint,
                     )
                   : ListView.builder(
                       itemCount: _devices.length,

@@ -5,8 +5,9 @@ import '../camera_session.dart';
 import '../scanning/barcode_decoder.dart';
 import '../scanning/frame_scanner.dart';
 import '../widgets/camera_bar.dart';
+import '../widgets/camera_empty_state.dart';
 import '../widgets/camera_stage.dart';
-import '../widgets/no_camera.dart';
+import '../widgets/feature_status_chip.dart';
 
 /// Shared UI + lifecycle for the QR and 1D barcode tabs. Shows the live preview
 /// with a scan hint, runs a [FrameScanner] over the shared session **only while
@@ -133,32 +134,27 @@ class _ScannerTabState extends State<ScannerTab> {
 
   Widget _body(BuildContext context, CameraSession session) {
     if (!session.isOpen) {
-      return NoCameraPlaceholder(
+      return CameraEmptyState(
         icon: widget.icon,
-        message: 'Connect a camera to scan a ${widget.subject}.',
+        headline: 'Connect a camera to scan a ${widget.subject}.',
+        hint: kConnectACameraHint,
       );
     }
     if (!session.supports(CameraFeature.frameCapture)) {
-      // Degrade to a clear "not supported" rather than a stream of per-frame
-      // errors — the whole point of querying support instead of assuming it.
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              widget.icon,
-              size: 48,
-              color: Theme.of(context).colorScheme.outline,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'This camera cannot capture still frames yet, so '
-              '${widget.subject} scanning is unavailable for it.',
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+      // Degrade rather than emit a stream of per-frame errors — the whole point
+      // of querying support instead of assuming it. The chip distinguishes
+      // *why*: a backend still being wired reads "Under development" instead of
+      // blaming the camera, which is what this screen used to do to EZVIZ.
+      final status = session.statusOf(CameraFeature.frameCapture);
+      return CameraEmptyState(
+        icon: widget.icon,
+        headline: '${widget.subject} scanning is unavailable',
+        actions: <Widget>[
+          FeatureStatusChip(
+            feature: CameraFeature.frameCapture,
+            status: status,
+          ),
+        ],
       );
     }
     return Column(

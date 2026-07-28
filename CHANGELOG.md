@@ -3,6 +3,59 @@
 All notable changes to this package are documented here. This project adheres to
 [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+### Fixed
+- **Android: `listDevices()` no longer leaks a raw `PlatformException`.**
+  `camera_android_camerax`'s `availableCameras()` has no `try`/`catch` of its own, so a CameraX
+  `InitializationException` arrived at consumers untouched — its `toString()` prints a ~30-line Java
+  stack trace, which is what reached the screen. The device-reports-no-camera case now returns an
+  **empty list** (CameraX's own advice for it is to retry, which a refresh does); everything else
+  becomes a `StateError` carrying a written message. `open()`, `captureFrame()` and `setZoom()` are
+  wrapped the same way.
+  This is a behaviour change, but the old behaviour was undocumented and contradicted the contract's
+  published promise that failures "never" surface as a raw platform exception — so it is filed as a
+  fix, not a breaking change. Windows was already unaffected (`camera_windows` wraps into
+  `CameraException` itself).
+- **Permission detection uses the platform's exact error code** (`CameraAccessDenied` /
+  `AudioAccessDenied` — the same constant on both Android and Windows) instead of searching the
+  message for "denied"/"permission", which both missed real failures and matched unrelated ones.
+
+### Changed
+- **`CameraProfileStore` default-selection contract.** The first profile saved into an *empty* store
+  now becomes the default, and no later save ever changes which profile is default. Previously no
+  save set a default at all, which left consumers falling back to "most recently created wins" at
+  startup — so merely adding a camera silently changed what opened at next launch, and adding one
+  that could not be opened made the app unlaunchable. Deleting the current default still promotes
+  the most-recent remaining profile, which is an explicit act on the default rather than a
+  side effect of adding.
+- **`CameraAdapter.featureMatrix` now fails safe.** `frameCapture`, `qrScanning` and
+  `barcodeScanning` previously defaulted to `CameraFeatureStatus.supported`, relying on a doc note
+  telling backends they "MUST override" to downgrade. A backend that forgot inherited a claim its
+  hardware could not honour. Undeclared features are now `unvalidated`.
+  `CameraFeatureMatrix.fromStatuses`'s `fallback` default changes from `unsupported` to
+  `unvalidated` for the same reason: undeclared means *unknown*, not *proven absent*.
+  **A backend that has verified a feature on real hardware must now declare it explicitly** —
+  `FlutterCameraAdapter` does. Consumers gating on `isSupported`/`supports` are unaffected:
+  `unvalidated` was already, and remains, not-supported for gating purposes.
+
+### Added
+- **`CameraRestoreGuard`** (+ `SharedPreferencesCameraRestoreGuard`) — a crash-loop breaker for the
+  "open my saved camera at startup" path. Mark before the open, clear after; a launch that finds the
+  mark still set knows the previous one did not survive and can skip the auto-open. This exists
+  because a native backend can kill the **process** rather than throw — the vendored EZVIZ plugin
+  dereferenced an uninitialised SDK handle on a Kotlin coroutine, producing a `FATAL EXCEPTION` no
+  Dart `try`/`catch` can intercept — and restore runs before any UI exists to escape from, so the
+  app became unlaunchable with no way in to remove the offending camera. Optional and
+  injectable: omit it and restore behaves exactly as before.
+- **`CameraAdapter.declaredFeatures`** — a concrete (non-breaking, empty-by-default) getter where a
+  backend states a status for every `CameraFeature`, readable without opening a device.
+  `featureMatrix` layers it over the queried derivation, so a claim lives in exactly one place.
+  `example/test/camera_feature_checklist_test.dart` walks the registry and fails by name for
+  anything undeclared.
+- `docs/camera/feature-support.md` — generated backend × feature table, regenerated and drift-checked
+  by `example/test/feature_support_doc_test.dart`.
+
 ## 1.0.0
 
 Initial release — core contract and the local-device backend.

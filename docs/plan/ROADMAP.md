@@ -3,7 +3,14 @@
 The canonical, checkable "where are we" tracker. Follow it top-down; update the status boxes and
 commit note as each item is verified and committed. This supersedes ad-hoc status notes.
 
-**Next action:** **Manually verify the Epic 2.5 slice against real hardware, then Epic 2.6.**
+**Next action:** **None — awaiting user direction.** The Epic 2.5 Android hardware pass on
+`1.0.3+4` was driven by hand on 2026-07-28 and **passed** — the app is fully functional on the
+test phone, with the startup-restore crash gone. Two non-critical defects found during that pass
+were deliberately **not** fixed and are recorded under "Follow-ups (not scheduled)": the
+intermittent ONVIF preview hang, and the EZVIZ re-sign-in dead end. No epic is started from
+here; the next item is chosen by the user in a later session. **Separately still outstanding:**
+the Windows webcam live enumeration + preview hardware pass (Epic 1) — the pass just run was
+Android-only and says nothing about Windows.
 Epic 2.5 is code-complete apart from the deliberately deferred WS-Discovery pipeline: the feature
 matrix (`8a390ee`), profile/secret persistence (`21fc728`), ONVIF credentials through
 `open(device)` (`4ea58ab`), the setup-wizard registry and three wizards (`13a0697`), the
@@ -42,6 +49,46 @@ for this same crash symptom) are not ancestors of `main` — they exist only on 
 `feat/workflow-branch-discipline` branch, so `main` still lacks their preview multi-mount guard and
 no-reopen-on-rename guard. Not ported over in this round (explicit scope decision); still a latent
 hazard worth its own follow-up.
+
+**No-camera messaging + fail-safe feature declarations (2026-07-27, branch
+`fix/no-camera-friendly-error`):** an Android device with no usable built-in camera rendered a ~30-line
+CameraX Java stack trace in the "Built-in camera" wizard. Root cause was two independent defects:
+`camera_android_camerax`'s `availableCameras()` has no `try`/`catch`, so a raw `PlatformException`
+escaped our `CameraException`-only guard, and six UI sites interpolated `'$e'`. Fixed at both layers
+(`lib/src/plugin_error_mapping.dart`, `example/lib/error_messages.dart`), and the same investigation
+closed a matching trap on the feature side: the tri-state `CameraFeatureStatus` model was invisible
+because every consumer collapsed it through `supports()`, and the base `featureMatrix` derivation
+defaulted unwired features to `supported`. Both flipped to fail-safe, with a new
+`CameraAdapter.declaredFeatures` + checklist test. See `history/2026-W31.md` and
+`docs/camera/feature-matrix.md` v1.4.
+**Hardware pass for this change: DONE (2026-07-28).** The Android empty state, the permission hints,
+and the rest of the Android surface were driven by hand on the test phone against `1.0.3+4` and
+behaved correctly — this change is now verified on-device, not just by analyzer/unit/widget coverage.
+Two unrelated defects surfaced during the same session and were deliberately deferred; see
+"Follow-ups (not scheduled)". **Windows was not covered by this pass** — it ran on Android hardware
+only, so the separate Windows webcam pass under Epic 1 stays open.
+
+**Startup-restore crash fixed, and the app is launchable again (2026-07-27, same branch, `1.0.3+4`):**
+the hardware pass above was blocked because the app died on every launch. A saved EZVIZ camera made
+it unlaunchable: `EzvizCameraAdapter.listDevices()` reached the native `getDeviceList` with no prior
+`initSDK` (init happened only in `open()`, and restore enumerates before it opens), so
+`EZGlobalSDK.getInstance()` was null and the vendored plugin's `NullPointerException` — thrown past a
+`catch (e: BaseException)` — killed the process during startup restore, before any UI existed to
+remove the offending camera from. **Latent since `8d10645` (2026-07-22), not a regression:** the
+parent commit's own build (`1.0.1+2` == `0aaf469`) was re-installed against the same app data and
+crashed identically, which also settles the open question of whether `36f6e06` caused it. Fixed with a
+shared `_ensureSdk()`, a backend-agnostic `CameraRestoreGuard` crash-loop breaker, and removal of the
+"most recently created wins" default fallback (adding a camera no longer changes what launches).
+Verified on `CPH2113` with app data preserved — including the exact killing scenario re-run with EZVIZ
+set as default. See `history/2026-W31.md`.
+
+**Open item — Candidate A, not fixed:** `meansNoCamera()` matches any `InitializationException`, and
+CameraX raises that for permission denial and transient failures too, so a recoverable error is
+flattened into an empty list ("No built-in camera found"). Confirmed by
+`test/flutter_camera_adapter_error_test.dart`, written as *characterisation*. Not narrowed here:
+matching on message text is what `36f6e06` deliberately removed, and narrowing safely needs a real
+logcat payload from an affected device. Not reproducible on `CPH2113`, whose built-in cameras
+enumerate and preview normally.
 
 **Every EZVIZ path is unverifiable on this machine** — the SDK raises `MissingPluginException` on
 Windows and no Android device has been attached — so EZVIZ has analyzer and compile coverage only.
@@ -363,6 +410,55 @@ they are recorded now rather than rediscovered later.
 ## Epic 4 — v2.0 (if demand arises)
 
 - [ ] macOS/Linux support via `camera_macos` / `camera_linux`.
+
+## Follow-ups (not scheduled)
+
+- [ ] **Generalize the "exhaustive declaration" pattern into the skills.** The
+      `declaredFeatures` + checklist-test + fail-safe-default design (2026-07-27) is a reusable
+      idiom — *closed enum + build-time exhaustiveness check + defaults that fail safe rather than
+      open* — not a camera-specific one. Recommendation from that change: **improve the two existing
+      skills rather than add a third.** `dart-solid-principles` is the natural home (it already owns
+      the *why* behind the design, and this is Open/Closed plus fail-safe defaults);
+      `camera-adapter-authoring` already carries the concrete camera instance in its new §6a. A
+      standalone skill would mostly restate both and add a routing decision for the agent to get
+      wrong. Deferred deliberately — recorded as future work, not built.
+- [ ] **Port the preview multi-mount and no-reopen-on-rename guards to `main`.** `9154be7` /
+      `4382db7` live only on the unmerged `feat/workflow-branch-discipline` branch (see the rename
+      note near the top of this file). Latent hazard.
+- [ ] **ONVIF preview connects but the display hangs (intermittent).** Found during the 2026-07-28
+      Android hardware pass; **not fixed — deliberate scope decision.** The camera connects, but the
+      preview shows a frozen/blank surface; reconnecting — sometimes several times — recovers it.
+      **Hypotheses only, unverified (no logs were captured):**
+      (1) `lib/src/onvif/rtsp_preview.dart:94` awaits `_player.open(Media(...))`, which in `media_kit`
+      resolves once playback is *queued*, **not** once a frame has decoded — there is no readiness
+      gate on first frame or video params; (2) nothing subscribes to `_player.stream.error`, so an
+      mpv-side RTSP failure is silently dropped. Together those mean a stalled session reports
+      success: the adapter flips to `isOpen` and `buildPreview()` returns a `Video` widget over a dead
+      surface, which is why a retry eventually works. (3) `profile: low-latency` + `cache: no`
+      (`rtsp_preview.dart:82-83`) plausibly widen the window — with no buffer the first render waits
+      on the next keyframe, and EZVIZ GOP intervals can run to seconds. A fix would most likely add a
+      first-frame/error gate before reporting `open()` successful; confirm against real logs first.
+      User-facing symptom + workaround documented in
+      [`onvif-setup-guide.md`](../camera/onvif-setup-guide.md).
+- [ ] **EZVIZ sign-in is unreachable after the first login (Android).** Found during the same pass;
+      **not fixed — deliberate scope decision.** Sign-in works once; after switching to another camera
+      and reselecting the EZVIZ one, the app asks for sign-in but **no login page appears**, and the
+      only way forward is to add the camera again. Of the two defects this is the more serious — a
+      saved EZVIZ profile is effectively single-use. **This one is structural, not a race:**
+      `EzvizAuthManager.openLoginPage()` is called from exactly one place — `_signIn()` in
+      `example/lib/ezviz/ezviz_wizard_flow.dart:136`, inside the add-camera wizard. The reconnect path
+      does not go through the wizard: `CameraSession.switchToProfile` →
+      `EzvizCameraAdapter.open()` → `_ensureSdk()`
+      (`example/lib/ezviz/ezviz_camera_adapter.dart:56-67`) calls `getAccessToken()` and throws when
+      it returns null, with **no route from that failure to a login page**. Re-running the wizard is
+      the only escape, which is exactly the observed workaround.
+      `EzvizSetupWizard.supportsEditing` is still `false`, so Edit offers no second route either.
+      **Separate open question, unresolved:** *why* the token is lost at all — `_bootstrap()` calls
+      `initSDK` with an **empty** access token (`ezviz_wizard_flow.dart:102-104`) on every wizard
+      mount, the same token-clobbering shape already documented against this vendored plugin, but
+      whether that, `close()`, or ordinary SDK expiry is responsible is unconfirmed. Fixing the design
+      gap (a re-auth route reachable from reconnect) and answering the token question are two
+      separable pieces of work.
 
 ---
 

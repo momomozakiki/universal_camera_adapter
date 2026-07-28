@@ -65,8 +65,11 @@ void main() {
       expect(got.device.lensFacing, CameraLensFacing.external);
       expect(got.device.metadata['host'], '192.168.1.50');
       expect(got.device.metadata['port'], 80);
-      // Full value-equality also holds (proves nothing silently dropped).
-      expect(got, saved);
+      // Full value-equality also holds (proves nothing silently dropped) —
+      // modulo isDefault, which the store sets here because this is the first
+      // profile in an empty store. See the promotion tests below.
+      expect(got.isDefault, isTrue);
+      expect(got, saved.copyWith(isDefault: true));
     });
 
     test('save updates an existing profile in place (matched by id)', () async {
@@ -75,6 +78,43 @@ void main() {
       final loaded = await store.loadAll();
       expect(loaded, hasLength(1));
       expect(loaded.single.displayName, 'New');
+    });
+
+    test('the first profile saved into an empty store becomes the default',
+        () async {
+      // A fresh install still opens a camera at launch without the user having
+      // to discover the "set as default" menu.
+      await store.save(profile(id: 'a'));
+      expect((await store.loadAll()).single.isDefault, isTrue);
+    });
+
+    test('a later save does not steal the default', () async {
+      // The regression this guards: when adding a camera could change what
+      // opened at startup, adding an unopenable one made the app unlaunchable.
+      await store.save(profile(id: 'a'));
+      await store.save(profile(id: 'b', createdAt: DateTime.utc(2026, 6, 1)));
+
+      final loaded = await store.loadAll();
+      expect(loaded.firstWhere((p) => p.id == 'a').isDefault, isTrue);
+      expect(loaded.firstWhere((p) => p.id == 'b').isDefault, isFalse);
+    });
+
+    test('promotion is scoped to an EMPTY store, not to "nothing is default"',
+        () async {
+      // The distinction that keeps most-recent-wins from creeping back in:
+      // once a store has entries, no save may promote anything, even when no
+      // profile is currently flagged. Existing installs (whose profiles all
+      // predate the rule) therefore stay at "nothing opens at launch" until
+      // the user chooses, rather than silently acquiring a default.
+      await store.save(profile(id: 'a'));
+      await store.save(profile(id: 'b'));
+      // Clear the flag the first-save rule set, leaving a populated store with
+      // no default at all.
+      await store.save(profile(id: 'a'));
+      expect((await store.loadAll()).where((p) => p.isDefault), isEmpty);
+
+      await store.save(profile(id: 'c', createdAt: DateTime.utc(2026, 9, 1)));
+      expect((await store.loadAll()).where((p) => p.isDefault), isEmpty);
     });
 
     test('saving a default flips every other default off', () async {

@@ -330,8 +330,31 @@ object EzvizManager {
             
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val deviceList = EZGlobalSDK.getInstance().getDeviceList(pageStart, pageSize)
-                    
+                    // EZGlobalSDK.getInstance() is null until initSDK has run, and dereferencing
+                    // it here KILLS THE PROCESS: the catch below is `BaseException` (the EZVIZ
+                    // SDK's own type), so a java.lang.NullPointerException is not caught, escapes
+                    // the coroutine, and becomes a FATAL EXCEPTION on DefaultDispatcher-worker-N.
+                    // No Dart try/catch can intercept that. Confirmed on device (CPH2113,
+                    // Android 12): a saved EZVIZ camera restored at startup made the app
+                    // unlaunchable, with no UI ever reached from which to remove it.
+                    // The Dart side no longer calls this uninitialised (EzvizCameraAdapter._ensureSdk),
+                    // so this is the second line of defence - and it reports the condition instead
+                    // of dying. NOTE: ~20 other EZGlobalSDK.getInstance() call sites in this file
+                    // have the same unguarded shape; only the one on the app's startup path is
+                    // fixed here.
+                    val sdk = EZGlobalSDK.getInstance()
+                    if (sdk == null) {
+                        withContext(Dispatchers.Main) {
+                            result.error(
+                                "SDK_NOT_INITIALIZED",
+                                "EZVIZ SDK is not initialised; call initSDK before getDeviceList",
+                                null
+                            )
+                        }
+                        return@launch
+                    }
+                    val deviceList = sdk.getDeviceList(pageStart, pageSize)
+
                     // EzvizDeviceManager.getDeviceList() (the Dart caller actually used by this
                     // app) decodes this map into ezviz_definition.dart's EzvizDeviceInfo, a FLAT
                     // model requiring deviceSerial, deviceName, isSupportPTZ, cameraNum - not the
